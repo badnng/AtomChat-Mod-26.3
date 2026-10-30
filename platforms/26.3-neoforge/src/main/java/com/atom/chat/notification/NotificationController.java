@@ -1,0 +1,186 @@
+package com.atom.chat.notification;
+
+import com.atom.chat.AtomChat;
+import com.atom.chat.chat.ChatMessage;
+import com.atom.chat.config.AtomChatConfig;
+import com.atom.chat.text.RichText;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.network.chat.Component;
+import net.minecraft.sounds.SoundEvent;
+import net.neoforged.neoforge.registries.RegisterEvent;
+
+/**
+ * Turns capture-side events (mentions, quote replies, incoming whispers) into
+ * notification side effects. The banner is Skia-rendered only while the
+ * AtomChat panel is open; the sound always respects its own toggle and a 2s
+ * dedupe gate.
+ */
+public final class NotificationController {
+    private static long lastSoundMs = NotificationSoundGate.NEVER;
+    /** Poke cue dedupe, deliberately separate so a poke never mutes a mention. */
+    private static final com.atom.chat.poke.PokeGate POKE_GATE = new com.atom.chat.poke.PokeGate();
+
+    /**
+     * Bundled notification cue. Must match {@code sounds.json}'s local key
+     * ({@code "notification"}), not {@code "atomchat.notification"} — the JSON
+     * keys are already scoped by the {@code assets/atomchat/} namespace.
+     */
+    public static final SoundEvent NOTIFICATION_SOUND =
+            SoundEvent.createVariableRangeEvent(Identifier.fromNamespaceAndPath("atomchat", "notification"));
+
+    private NotificationController() {
+    }
+
+    /**
+     * Registers the bundled cue through the mod-bus {@link RegisterEvent}, which
+     * fires inside NeoForge's unfreeze/re-freeze window. Registering straight
+     * from the client constructor instead throws "Registry is already frozen"
+     * whenever another mod (or a loader-version quirk) has already frozen the
+     * registries by the time we are constructed.
+     */
+    public static void registerSound(RegisterEvent event) {
+        try {
+            event.register(Registries.SOUND_EVENT, NOTIFICATION_SOUND.location(), () -> NOTIFICATION_SOUND);
+        } catch (RuntimeException e) {
+            // A missing registration only costs us Holder/network lookups; the
+            // cue still resolves by location for client-side playback. Losing
+            // the sound must never take the whole panel down.
+            AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("notify", "Failed to register notification sound, continuing without it"), e);
+        }
+    }
+
+    /** Plays the cue directly, bypassing the gate — the settings "test sound" card. */
+    public static void playTestSound() {
+        Minecraft client = Minecraft.getInstance();
+        if (client == null) {
+            return;
+        }
+        float volume = com.atom.chat.audio.FeedbackSoundPolicy.volume(AtomChatConfig.get().notificationSoundEnabled, true, AtomChatConfig.get().notifyVolume);
+        if (volume <= 0) return;
+        // SimpleSoundInstance.forUI(SoundEvent, pitch, volume) — in 1.21.1
+        // the second float is pitch and the third is volume. Passing notifyVolume
+        // as the second float made the slider change pitch at full volume.
+        debug("playTestSound volume=" + volume);
+        client.getSoundManager().play(SimpleSoundInstance.forUI(NOTIFICATION_SOUND, 1.0F, volume));
+    }
+
+    /**
+     * The poke cue: the same bundled pop pitched up, so a poke reads as its own
+     * "hey" without a second asset. Its own clock keeps a poke from muting a
+     * mention cue and vice versa.
+     */
+    public static void playPokeSound() {
+        Minecraft client = Minecraft.getInstance();
+        if (client == null || client.player == null) {
+            return;
+        }
+        if (!POKE_GATE.allow(System.currentTimeMillis())) {
+            return;
+        }
+        float volume = com.atom.chat.audio.FeedbackSoundPolicy.volume(AtomChatConfig.get().notificationSoundEnabled, true, AtomChatConfig.get().notifyVolume);
+        if (volume <= 0) return;
+        client.getSoundManager().play(SimpleSoundInstance.forUI(NOTIFICATION_SOUND, 1.25F, volume));
+    }
+
+    public static void onMention(ChatMessage message) {
+        fire(NotificationBanner.Type.MENTION, message);
+    }
+
+    public static void onQuote(ChatMessage message) {
+        fire(NotificationBanner.Type.QUOTE, message);
+    }
+
+    public static void onWhisper(ChatMessage message) {
+        fire(NotificationBanner.Type.WHISPER, message);
+    }
+    /**
+     * Test-command entry: a banner for a message that never existed. It goes
+     * through {@link #fire} unchanged, so the settings toggles, the sound gate
+     * and the dedupe all behave exactly as they would for a captured message —
+     * a tester who disabled a banner still gets nothing, which is the point of
+     * testing the real path rather than a parallel one.
+     *
+     * <p>The synthetic message is deliberately not added to {@link com.atom.chat.chat.ChatStore}:
+     * the banner's jump would have nothing real to land on, but inventing history
+     * rows would outlive the test in the chat list and in the saved history file.</p>
+     */
+    public static void onTestBanner(NotificationBanner.Type type, java.util.UUID senderUuid,
+                                    String senderName, String text) {
+        Component component = Component.literal(text == null ? "" : text);
+        ChatMessage message = new ChatMessage(component, false, false, null, null,
+                senderUuid, senderName, senderName, text);
+        debug("onTestBanner type=" + type + " sender=" + senderName);
+        fire(type, message);
+    }
+
+    private static void fire(NotificationBanner.Type type, ChatMessage message) {
+        if (message == null || message.isOwn()) {
+            debug("fire skipped type=" + type + " message=" + (message == null ? "null" : "own"));
+            return;
+        }
+        Minecraft client = Minecraft.getInstance();
+        boolean soundOn = NotificationBanner.soundEnabled(type);
+        debug("fire type=" + type
+                + " soundOn=" + soundOn
+                + " player=" + (client != null && client.player != null)
+                + " world=" + (client != null && client.level != null)
+                + " screen=" + (client != null && client.gui.screen() != null
+                        ? client.gui.screen().getClass().getSimpleName() : "null"));
+        if (soundOn) {
+            playSound(type);
+        }
+        // Queue globally, render panel-only: opening the panel inside the 4s
+        // window must reveal the banner, so enqueueing cannot depend on the
+        // screen being open right now.
+        boolean canQueue = NotificationBanner.enabled(type)
+                && client != null && client.level != null;
+        if (canQueue) {
+            // The banner takes the message's rich parts, not their plain text: the
+            // sender name's team colour and every coloured run of the body reach
+            // the banner rows. The plain sender stays as the fallback for a
+            // message whose rich sender part is empty (a system line), which is
+            // what the old string path enqueued.
+            String sender = message.getSenderName();
+            if (sender == null || sender.isBlank()) {
+                sender = message.getProfileName();
+            }
+            RichText senderRich = message.getSenderRich();
+            NotificationBanner.INSTANCE.enqueue(type,
+                    senderRich.isEmpty() ? RichText.literal(sender == null ? "" : sender) : senderRich,
+                    message.getContentRich(), message);
+        }
+    }
+
+    private static void playSound(NotificationBanner.Type type) {
+        Minecraft client = Minecraft.getInstance();
+        if (client == null || client.player == null) {
+            debug("playSound skipped type=" + type + " client=" + (client != null)
+                    + " player=" + (client != null && client.player != null));
+            return;
+        }
+        long now = System.currentTimeMillis();
+        boolean allowed = NotificationSoundGate.shouldPlay(now, lastSoundMs);
+        debug("playSound type=" + type + " allowed=" + allowed
+                + " lastSoundMs=" + lastSoundMs + " now=" + now);
+        if (!allowed) {
+            return;
+        }
+        lastSoundMs = now;
+        float volume = com.atom.chat.audio.FeedbackSoundPolicy.volume(AtomChatConfig.get().notificationSoundEnabled, true, AtomChatConfig.get().notifyVolume);
+        if (volume <= 0) return;
+        debug("playSound playing type=" + type + " volume=" + volume);
+        // SimpleSoundInstance.forUI(SoundEvent, pitch, volume) — see
+        // playTestSound() for the same parameter-order note.
+        client.getSoundManager().play(SimpleSoundInstance.forUI(NOTIFICATION_SOUND, 1.0F, volume));
+    }
+
+    /** Debug-only diagnostics; silent unless the About-page debug switch is on. */
+    private static void debug(String message) {
+        if (AtomChatConfig.get().debug) {
+            AtomChat.LOGGER.info(com.atom.chat.diagnostics.AtomChatLog.message("notify", "[notify] {}"), message);
+        }
+    }
+}

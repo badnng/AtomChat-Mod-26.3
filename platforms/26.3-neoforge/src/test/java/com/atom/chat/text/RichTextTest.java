@@ -1,0 +1,226 @@
+package com.atom.chat.text;
+
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.Component;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class RichTextTest {
+    @Test
+    void flattenPreservesRunStyles() {
+        Style click = Style.EMPTY.withClickEvent(new ClickEvent.RunCommand("/x"));
+        Component text = Component.literal("a").setStyle(click).append(Component.literal("b"));
+        RichText rich = RichText.of(text);
+        assertEquals("ab", rich.getString());
+        assertEquals(1, rich.runs().size());
+        assertEquals(click, rich.runs().get(0).style());
+    }
+
+    @Test
+    void sliceKeepsStyles() {
+        Component text = Component.literal("abc").setStyle(Style.EMPTY.withColor(0xFF0000))
+                .append(Component.literal("def").setStyle(Style.EMPTY.withUnderlined(true)));
+        RichText sliced = RichText.of(text).slice(2, 5);
+        assertEquals("cde", sliced.getString());
+        assertEquals(0xFF0000, sliced.runs().get(0).style().getColor().getValue());
+    }
+
+    @Test
+    void linkifyBareUrls() {
+        RichText rich = RichText.literal("see https://example.com/x now");
+        RichText linked = rich.linkifyUrls();
+        assertTrue(linked.runs().stream().anyMatch(r -> r.style().getClickEvent() != null
+                && r.style().getClickEvent().action() == ClickEvent.Action.OPEN_URL));
+    }
+
+    @Test
+    void linkifyPreservesMalformedUrlsWithoutCrashingOrLosingText() {
+        String text = "look https://example.com/%broken and https://example.com/[unfinished now";
+        Style color = Style.EMPTY.withColor(0x123456);
+        RichText linked = RichText.of(Component.literal(text).setStyle(color)).linkifyUrls();
+        assertEquals(text, linked.getString());
+        assertTrue(linked.runs().stream().allMatch(run -> run.style().getClickEvent() == null));
+        assertTrue(linked.runs().stream().allMatch(run -> color.equals(run.style())));
+    }
+
+    @Test
+    void linkifyKeepsValidUrlAfterMalformedUrl() {
+        String text = "https://example.com/%broken then https://example.com/valid";
+        RichText linked = RichText.literal(text).linkifyUrls();
+        assertEquals(text, linked.getString());
+        var links = linked.runs().stream()
+                .filter(run -> run.style().getClickEvent() instanceof ClickEvent.OpenUrl).toList();
+        assertEquals(1, links.size());
+        assertEquals("https://example.com/valid",
+                ((ClickEvent.OpenUrl) links.getFirst().style().getClickEvent()).uri().toString());
+    }
+
+    @Test
+    void sliceNeverSplitsSurrogatePairs() {
+        RichText rich = RichText.literal("a\uD83D\uDE00b");
+        assertEquals("a\uD83D\uDE00b", rich.getString());
+        assertEquals("\uD83D\uDE00", rich.slice(1, 3).getString());
+        assertEquals("\uD83D\uDE00", rich.slice(1, 2).getString());
+        assertEquals("\uD83D\uDE00", rich.slice(2, 3).getString());
+    }
+
+    @Test
+    void linkifyPreservesFullTextAndMultipleUrls() {
+        RichText linked = RichText.literal("go https://a.test and https://b.test end").linkifyUrls();
+        assertEquals("go https://a.test and https://b.test end", linked.getString());
+        assertEquals(5, linked.runs().size());
+        assertEquals(2, linked.runs().stream()
+                .filter(r -> r.style().getClickEvent() != null
+                        && r.style().getClickEvent().action() == ClickEvent.Action.OPEN_URL)
+                .count());
+    }
+
+    @Test
+    void linkifyLeavesExistingClickRunsUntouched() {
+        Style click = Style.EMPTY.withClickEvent(new ClickEvent.OpenUrl(java.net.URI.create("https://already.example")));
+        RichText rich = RichText.of(Component.literal("https://example.com").setStyle(click));
+        RichText linked = rich.linkifyUrls();
+        assertEquals(1, linked.runs().size());
+        assertEquals(click, linked.runs().get(0).style());
+    }
+
+    @Test
+    void linkifyPreservesOriginalRunStyle() {
+        Style colored = Style.EMPTY.withColor(0x00FF00);
+        RichText rich = RichText.of(Component.literal("see https://example.com/x").setStyle(colored));
+        RichText linked = rich.linkifyUrls();
+        RichText.RichRun link = linked.runs().stream()
+                .filter(r -> r.style().getClickEvent() != null)
+                .findFirst().orElseThrow();
+        assertEquals(0x00FF00, link.style().getColor().getValue());
+        assertEquals(colored, link.style().withClickEvent(null));
+    }
+
+    @Test
+    void ofParsesLegacyFormattingCodesAndStripsControlPairs() {
+        RichText rich = RichText.of(Component.literal("§aHello §rWorld"));
+        assertEquals("Hello World", rich.getString());
+        assertEquals(2, rich.runs().size());
+        assertEquals("Hello ", rich.runs().get(0).text());
+        assertEquals(0x55FF55, rich.runs().get(0).style().getColor().getValue());
+        assertEquals("World", rich.runs().get(1).text());
+        assertEquals(null, rich.runs().get(1).style().getColor());
+    }
+
+    @Test
+    void ofGroupsContiguousCharactersByEffectiveStyle() {
+        RichText rich = RichText.of(Component.literal("§aA§cB"));
+        assertEquals("AB", rich.getString());
+        assertEquals(2, rich.runs().size());
+        assertEquals(0x55FF55, rich.runs().get(0).style().getColor().getValue());
+        assertEquals(0xFF5555, rich.runs().get(1).style().getColor().getValue());
+    }
+
+    @Test
+    void emptyAndEmptySlicesReportEmpty() {
+        assertTrue(RichText.empty().isEmpty());
+        assertTrue(RichText.literal("").isEmpty());
+        assertTrue(RichText.literal("abc").slice(2, 2).isEmpty());
+    }
+
+    @Test
+    void slicePreservesRootStyle() {
+        Style root = Style.EMPTY.withColor(0x123456);
+        RichText emptyText = RichText.of(Component.literal("").setStyle(root));
+        assertEquals(root, emptyText.slice(0, 0).rootStyle());
+    }
+
+    @Test
+    void spliceReplacesRangeAndKeepsStyles() {
+        RichText rich = RichText.of(Component.literal("abc").setStyle(Style.EMPTY.withColor(0xFF0000))
+                .append(Component.literal("def").setStyle(Style.EMPTY.withColor(0x00FF00))));
+        RichText replaced = rich.splice(2, 5,
+                RichText.of(Component.literal("XY").setStyle(Style.EMPTY.withColor(0x0000FF))));
+        assertEquals("abXYf", replaced.getString());
+        assertEquals(0xFF0000, replaced.runs().get(0).style().getColor().getValue());
+        assertEquals(0x0000FF, replaced.slice(2, 4).runs().get(0).style().getColor().getValue());
+    }
+
+    @Test
+    void spliceClampsAndKeepsRootStyle() {
+        Style root = Style.EMPTY.withColor(0x123456);
+        RichText rich = RichText.of(Component.literal("abc").setStyle(root));
+        assertEquals("abc", rich.splice(1, 1, RichText.empty()).getString());
+        assertEquals("bc", rich.splice(-5, 1, RichText.empty()).getString());
+        assertEquals(root, rich.splice(0, 1, RichText.literal("z")).rootStyle());
+    }
+
+    /**
+     * splice 之后相邻的同样式段必须被合并成一段。
+     *
+     * <p>为什么单独立一条：splice 的 run 结构真的漂移过 —— 一侧的 splice 漏调了
+     * {@code mergeRuns}，而上面两条只断字符串的用例完全逮不到：文本一模一样、
+     * 视觉一模一样，只有 {@code runs()} 的段数不同（3 段 vs 1 段）。
+     */
+    @Test
+    void spliceMergesAdjacentRunsWithTheSameStyle() {
+        Style red = Style.EMPTY.withColor(0xFF0000);
+        RichText rich = RichText.of(Component.literal("abc").setStyle(red));
+
+        RichText replaced = rich.splice(1, 2, RichText.of(Component.literal("X").setStyle(red)));
+        assertEquals("aXc", replaced.getString());
+        assertEquals(1, replaced.runs().size(),
+                "同样式的三段拼接必须合并成一段（漏调 mergeRuns 时是 3 段）");
+        assertEquals(red, replaced.runs().get(0).style());
+
+        RichText appended = rich.splice(3, 3, RichText.of(Component.literal("Z").setStyle(red)));
+        assertEquals("abcZ", appended.getString());
+        assertEquals(1, appended.runs().size(), "尾端追加同样式也必须合并");
+
+        RichText mixed = rich.splice(1, 2,
+                RichText.of(Component.literal("X").setStyle(Style.EMPTY.withColor(0x00FF00))));
+        assertEquals("aXc", mixed.getString());
+        assertEquals(3, mixed.runs().size(), "不同样式的相邻段不许被合并（合并过头同样是缺陷）");
+    }
+
+    @Test
+    void linkifyStaysOffAnImageCodeTail() {
+        // A code the panel cannot render used to be drawn as a text bubble, and
+        // the URL pattern swallowed ",name=…,w=…,h=…]]" into the click value:
+        // clicking it threw URISyntaxException.
+        String code = "[[CICode,url=https://h.uguu.se/a.png,name=a.png,w=128,h=128]]";
+        RichText linked = RichText.literal(code).linkifyUrls();
+        assertEquals(code, linked.getString());
+        assertEquals(1, linked.runs().size(), "the code must stay a single unlinked run");
+        assertTrue(linked.runs().stream().allMatch(r -> r.style().getClickEvent() == null));
+    }
+
+    @Test
+    void linkifyStillLinksTextAroundACode() {
+        String text = "look [[CICode,url=https://a.test/a.png,name=a]] at https://b.test now";
+        RichText linked = RichText.literal(text).linkifyUrls();
+        assertEquals(text, linked.getString());
+        assertEquals("https://b.test", linked.runs().stream()
+                .filter(r -> r.style().getClickEvent() != null)
+                .findFirst().orElseThrow().text());
+    }
+
+    @Test
+    void stripInteractionsDropsLinkAndUnderlineButKeepsColour() {
+        // The private-chat sender goes through stripInteractions so a vanilla
+        // /msg click never turns the name into a misleading link. The explicit
+        // colour is part of the wire's styling and must survive that strip.
+        Style link = Style.EMPTY.withColor(0x55FF55).withUnderlined(true)
+                .withClickEvent(new ClickEvent.SuggestCommand("/msg Steve "));
+        RichText stripped = RichText.of(Component.literal("Steve").setStyle(link)).stripInteractions();
+        assertEquals("Steve", stripped.getString());
+        assertEquals(0x55FF55, stripped.runs().get(0).style().getColor().getValue());
+        assertEquals(null, stripped.runs().get(0).style().getClickEvent());
+        assertFalse(stripped.runs().get(0).style().isUnderlined());
+    }
+
+    @Test
+    void stripInteractionsKeepsColourlessRunsColourless() {
+        RichText stripped = RichText.literal("Steve").stripInteractions();
+        assertFalse(stripped.hasColor());
+    }
+}

@@ -19,7 +19,7 @@
 
   "files": {
     "yarn": "platforms/1.21.1-fabric/src/main/resources/atomchat.accesswidener",
-    "official": "platforms/1.21.1-neoforge/src/main/resources/META-INF/accesstransformer.cfg",
+    "official": "platforms/26.3-neoforge/src/main/resources/META-INF/accesstransformer.cfg",
     "srg": "platforms/1.20.1-forge/src/main/resources/META-INF/accesstransformer.cfg"
   },
 

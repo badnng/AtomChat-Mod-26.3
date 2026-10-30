@@ -1,266 +1,241 @@
 name: Release
 
-# 单分支多目标：发什么由 versions/targets.json 决定，本文件里没有分支名。
-#
-# 【标签分两类】
-#   vX.Y.Z        正式版 —— 建 Release，并发布到 CurseForge（Modrinth 未配置 token / 项目 id 时自动跳过）
-#   vX.Y.Z-rc1    预发布 —— 只建 prerelease，**不发布到商店**；演练与候选版走这条
-# 分这两类是为了让"走一遍完整流程"不必污染商店：pre 标签会把发布那一段整段跳过。
-#
-# 【workflow_dispatch】用来在不动标签的情况下重跑发布（token 换了、商店侧卡住），
-# target 输入可以只发某一个目标；dry_run 只构建与校验，不建 Release、不发商店。
-
 on:
   push:
-    tags: ["v*"]
+    tags: ['v*']
   workflow_dispatch:
     inputs:
+      tag:
+        description: 已存在且版本号匹配的 v* 标签
+        required: true
+        type: string
       target:
-        description: 只发布某个目标（手动触发时）
-        required: false
+        description: 商店发布目标（all 或 versions/targets.json 中的可发布目标）
         default: all
-        type: choice
-        options:
-          - all
-          - 1.21.1-fabric
-          - 1.21.1-neoforge
-          - 1.20.1-forge
+        type: string
       dry_run:
-        description: 只构建与校验，不建 Release、不发布到商店
-        required: false
+        description: 只构建并校验，不创建 Release 或发布到商店
+        default: true
+        type: boolean
+      publish_stores_only:
+        description: 仅从已发布 Release 下载原附件并重试商店发布（需关闭 dry_run）
         default: false
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
+
+# A tag's draft and its store uploads cannot race another attempt for that tag.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   targets:
-    name: 校验矩阵
-    runs-on: ubuntu-latest
+    name: 校验标签与发布矩阵
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       list: ${{ steps.matrix.outputs.list }}
+      publish_list: ${{ steps.matrix.outputs.publish_list }}
+      commit: ${{ steps.matrix.outputs.commit }}
+      tag: ${{ steps.tag.outputs.tag }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v7
-
-      - name: 校验 versions/ 与各平台的身份来源
-        run: python3 tools/verify_targets.py --matrix-out "$RUNNER_TEMP/matrix.json"
-
-      - name: 导出矩阵
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - name: 校验版本、标签与离线脚本
+        id: tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          python3 -B .github/scripts/release_ci.py validate-tag --tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
+          python3 -B -m unittest discover -s .github/scripts -p 'test_*.py'
+          python3 -B tools/test_verify_jars.py
+          python3 -B tools/verify_targets.py --matrix-out "$RUNNER_TEMP/matrix.json"
+      - name: 导出可发布目标与提交号
         id: matrix
-        run: echo "list=$(cat "$RUNNER_TEMP/matrix.json")" >> "$GITHUB_OUTPUT"
+        env:
+          SELECTED_TARGET: ${{ inputs.target || 'all' }}
+          STORES_ONLY: ${{ inputs.publish_stores_only == true }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: |
+          python3 -B - <<'PY'
+          import json, os, pathlib, subprocess
+          if os.environ['STORES_ONLY'] == 'true' and os.environ['DRY_RUN'] == 'true':
+              raise SystemExit('publish_stores_only requires dry_run=false')
+          matrix = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'matrix.json').read_text())
+          matrix = [item for item in matrix if item['buildable']]
+          selected = os.environ['SELECTED_TARGET']
+          publish = [item for item in matrix if selected == 'all' or item['target'] == selected]
+          if not matrix or not publish:
+              raise SystemExit('No matching buildable target in versions/targets.json')
+          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('list=' + json.dumps(matrix) + '\n')
+              output.write('publish_list=' + json.dumps(publish) + '\n')
+              output.write('commit=' + commit + '\n')
+          PY
 
   build:
     name: 构建 ${{ matrix.target }}
     needs: targets
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    if: inputs.publish_stores_only != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.targets.outputs.list) }}
+    env:
+      ATOMCHAT_BUILD_SHA: ${{ needs.targets.outputs.commit }}
     steps:
-      - uses: actions/checkout@v7
-
-      # Skija 的 Linux 原生库链接 EGL/GL；测试的类路径里有它。
-      - name: 安装 Skija 的 Linux 系统依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1
-
-      - name: 设置 JDK ${{ matrix.java }}
-        uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          java-version: "${{ matrix.java }}"
-          distribution: temurin
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
-
-      # 版本号只有一处（仓库根 gradle.properties），所以标签只需要跟这一处对齐 ——
-      # 旧流程要在三个分支上各校验一次，那是"身份有三份"的直接后果。
-      - name: 校验仓库版本号与标签一致
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          EXPECTED="${GITHUB_REF_NAME#v}"
-          ACTUAL="$(grep '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '\r')"
-          if [ "$EXPECTED" != "$ACTUAL" ]; then
-            echo "::error::仓库根的 mod_version=${ACTUAL} 与标签 ${EXPECTED} 不一致"
-            exit 1
-          fi
-          echo "版本 ${ACTUAL} 与标签一致"
-
-      - name: 构建并测试
-        working-directory: ${{ matrix.project }}
-        run: |
-          chmod +x ./gradlew
-          ./gradlew build --no-daemon
-          ./gradlew build -Patomchat.nativePlatform=linux-x64 --no-daemon
-
-      # 发出去的字节更要查这一条：标签是在干净 checkout 上检出的，所以戳里的
-      # git_dirty 只有 true 一种错法，而它会让人以为发行版来自未提交的源码。
-      - name: 断言构建戳没说谎
-        working-directory: ${{ matrix.project }}
-        run: |
-          set -euo pipefail
-          while IFS= read -r jar; do
-          echo "构建戳（$jar）："
-          unzip -p "$jar" atomchat-build.properties
-          if unzip -p "$jar" atomchat-build.properties | grep -q '^git_dirty=true'; then
-            echo "::error::发行 jar 的构建戳写着 git_dirty=true，但标签是在干净的 checkout 上检出的"
-            exit 1
-          fi
-          done < <(find build/libs build/linux-x64/libs -name "*.jar" ! -name "*sources*" ! -name "*-slim*")
-
-      # 发出去的字节更要查这一层：单测跑的是类路径，看不出打包时少塞了一个嵌套 jar。
-      - name: 断言产物内容
-        run: |
-          python3 tools/test_verify_jars.py
-          python3 tools/verify_jars.py --platform windows-x64 "${{ matrix.project }}"
-          python3 tools/verify_jars.py --platform linux-x64 "${{ matrix.project }}"
-
-      - name: 取产物（-slim 与 sources 一律不要）
-        working-directory: ${{ matrix.project }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/dist"
-          find build/libs build/linux-x64/libs -name "*.jar" ! -name "*sources*" ! -name "*-slim*" \
-            -exec cp {} "$GITHUB_WORKSPACE/dist/" \;
-          ls -la "$GITHUB_WORKSPACE/dist"
-          count=$(find "$GITHUB_WORKSPACE/dist" -name "*.jar" | wc -l)
-          if [ "$count" -ne 2 ]; then
-            echo "::error::期望恰好 Windows / Linux 两个发布 jar，实际 $count 个 —— 产物名有歧义时取件规则要重新定"
-            exit 1
-          fi
-          if find "$GITHUB_WORKSPACE/dist" -name "*-slim*" | grep -q .; then
-            echo "::error::取到的是 -slim 包（不含内嵌依赖）"
-            exit 1
-          fi
-
-      - name: 上传产物
-        uses: actions/upload-artifact@v7
+          ref: ${{ needs.targets.outputs.commit }}
+          persist-credentials: false
+      - uses: ./.github/actions/build-mod
         with:
-          name: jar-${{ matrix.target }}${{ matrix.suffix }}
-          path: dist/*.jar
+          target: ${{ matrix.target }}
+          project: ${{ matrix.project }}
+          java: ${{ matrix.java }}
+          artifact-name: jar-${{ matrix.target }}
+          cache-read-only: 'true'
+
+  package:
+    name: 汇总并复核完整发布包
+    needs: [targets, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ATOMCHAT_BUILD_SHA: ${{ needs.targets.outputs.commit }}
+      RELEASE_TAG: ${{ needs.targets.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.targets.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: jar-*
+          path: ${{ runner.temp }}/artifacts
+      - name: 校验所有目标、构建戳、SHA-256 与发布说明
+        run: |
+          python3 -B .github/scripts/release_ci.py prepare --tag "$RELEASE_TAG" \
+            --artifacts-dir "$RUNNER_TEMP/artifacts" --output "$RUNNER_TEMP/release-package/files" \
+            --notes "$RUNNER_TEMP/release-package/release-notes.md"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-bundle
+          path: ${{ runner.temp }}/release-package/
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
   release:
-    name: 建 Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v') && inputs.dry_run != true
-    runs-on: ubuntu-latest
+    name: 完整上传草稿附件后发布
+    needs: [targets, package]
+    if: github.repository == 'badnng/AtomChat-Mod-26.3' && inputs.dry_run != true
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-
-      - name: 取回六个 jar
-        uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: 汇总并校验数量
-        run: |
-          set -euo pipefail
-          mkdir -p release-out
-          find artifacts -name "*.jar" ! -name "*sources*" ! -name "*-slim*" -exec cp {} release-out/ \;
-          ls -la release-out
-          count=$(find release-out -name "*.jar" | wc -l)
-          echo "Release 将挂上 ${count} 个 jar"
-          if [ "$count" -ne 6 ]; then
-            echo "::error::Release 期望 6 个发布 JAR（3 个加载器 × 2 个操作系统），实际 ${count} 个"
-            exit 1
-          fi
-
-      # 发布说明取自仓库根的 RELEASE_NOTES.md（单分支之后它只有一份）
-      - name: 摘出版本对应的说明
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}" python3 - <<'PY'
-          import os
-          version = os.environ["VERSION"]
-          with open("RELEASE_NOTES.md", encoding="utf-8") as f:
-              notes = f.read()
-          start = notes.find("## v" + version)
-          if start < 0:
-              # 预发布/hotfix 标签复用基础版本的段落（v0.2.92-rc1 → v0.2.92）
-              start = notes.find("## v" + version.split("-")[0])
-          if start < 0:
-              raise SystemExit(f"ERROR: RELEASE_NOTES.md 里没有 '## v{version}' 段落 —— 打标签前先写它")
-          end = notes.find("\n## ", start + 1)
-          section = (notes[start:end] if end > start else notes[start:]).strip()
-          with open("release-notes.md", "w", encoding="utf-8") as f:
-              f.write(section + "\n")
-          print(section[:400])
-          PY
-
-      - name: 建 Release
-        uses: softprops/action-gh-release@v2
+          ref: ${{ needs.targets.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          files: release-out/*.jar
-          body_path: release-notes.md
-          draft: false
-          # 带后缀的标签（-rc1 / -beta / -alpha）就是预发布
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          name: release-bundle
+          path: ${{ runner.temp }}/release-package
+      - name: 发布（已发布标签拒绝覆盖）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.targets.outputs.tag }}
+          PRERELEASE: ${{ needs.targets.outputs.prerelease }}
+          ATOMCHAT_BUILD_SHA: ${{ needs.targets.outputs.commit }}
+        run: |
+          args=()
+          if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
+          python3 -B .github/scripts/publish_github.py --tag "$RELEASE_TAG" \
+            --directory "$RUNNER_TEMP/release-package/files" \
+            --notes "$RUNNER_TEMP/release-package/release-notes.md" "${args[@]}"
 
-  # 商店发布与建 Release 分开：手动重发时不必重新建 Release。
-  # 预发布标签整段跳过 —— 候选版不该出现在商店里。
-  #
-  # ⚠ job 级的 if 里没有 matrix 上下文（它只在 step 级可用），所以「只发某个目标」
-  # 这个过滤写在下面的 step 上：写成 job 级会让整个工作流在校验阶段就被拒掉，
-  # 表现是 0 秒失败、日志为空，只说"workflow file issue"。
   publish:
-    name: 发布到商店 ${{ matrix.target }}
-    # targets 必须列在 needs 里：下面的 matrix 读的是 needs.targets.outputs.list。
-    # 只写 needs: build 的后果不是报错，而是这个 job 被整条丢掉 —— 整条 run 标红、
-    # 日志为空、jobs 列表里少一个。预发布演练看不见它（if 直接跳过，matrix 不求值），
-    # 只有真发版才会撞上（0.2.10 撞上了）。
-    needs: [targets, build]
+    name: 发布原始附件到商店 ${{ matrix.target }}
+    needs: [targets, release]
     if: >-
-      ${{
-        startsWith(github.ref, 'refs/tags/v') &&
-        !contains(github.ref_name, '-') &&
-        inputs.dry_run != true
-      }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+      always() && !cancelled() && needs.targets.result == 'success' &&
+      github.repository == 'badnng/AtomChat-Mod-26.3' &&
+      inputs.dry_run != true && needs.targets.outputs.prerelease == 'false' &&
+      (needs.release.result == 'success' || inputs.publish_stores_only == true)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.targets.outputs.list) }}
+        include: ${{ fromJSON(needs.targets.outputs.publish_list) }}
+    env:
+      ATOMCHAT_BUILD_SHA: ${{ needs.targets.outputs.commit }}
+      RELEASE_TAG: ${{ needs.targets.outputs.tag }}
     steps:
-      - uses: actions/checkout@v7
-
-      - name: 安装 Skija 的 Linux 系统依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1
-
-      - name: 设置 JDK ${{ matrix.java }}
-        uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          java-version: "${{ matrix.java }}"
-          distribution: temurin
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
-
-      # publishMods 由各平台自己的 build.gradle 定义（dependsOn modrinth / curseforge），
-      # 两个商店各自带 onlyIf 闸：没 token 或项目 id 没填就 SKIPPED，不会红。
-      - name: 构建并发布到 Modrinth 与 CurseForge
-        if: >-
-          ${{
-            inputs.target == '' ||
-            inputs.target == 'all' ||
-            inputs.target == matrix.target
-          }}
-        working-directory: ${{ matrix.project }}
-        run: |
-          chmod +x ./gradlew
-          ./gradlew build --no-daemon
-          ./gradlew build -Patomchat.nativePlatform=linux-x64 --no-daemon
-          python3 ../../tools/verify_jars.py --platform windows-x64 "$PWD"
-          python3 ../../tools/verify_jars.py --platform linux-x64 "$PWD"
-          ./gradlew publishMods --no-daemon
-          ./gradlew publishMods -Patomchat.nativePlatform=linux-x64 --no-daemon
+          ref: ${{ needs.targets.outputs.commit }}
+          persist-credentials: false
+      - name: 下载已发布 Release 的同一份目标附件
         env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" = false
+          mkdir -p "$RUNNER_TEMP/store-artifacts/$TARGET"
+          gh release download "$RELEASE_TAG" --pattern '*.jar' \
+            --pattern "build-info-$TARGET.json" --pattern "SHA256SUMS-$TARGET" \
+            --dir "$RUNNER_TEMP/store-download"
+          TARGET="$TARGET" python3 -B - <<'PY'
+          import json, os, pathlib, shutil
+          base = pathlib.Path(os.environ['RUNNER_TEMP'])
+          target = os.environ['TARGET']
+          source, dest = base / 'store-download', base / 'store-artifacts' / target
+          info = json.loads((source / f'build-info-{target}.json').read_text(encoding='utf-8'))
+          for item in info['artifacts']:
+              name = item['fileName']
+              if pathlib.PurePosixPath(name).name != name or '\\' in name:
+                  raise SystemExit('Unsafe release artifact filename')
+              shutil.copyfile(source / name, dest / name)
+          shutil.copyfile(source / f'build-info-{target}.json', dest / 'build-info.json')
+          shutil.copyfile(source / f'SHA256SUMS-{target}', dest / 'SHA256SUMS')
+          PY
+      - name: 复核下载附件，固定两种操作系统的输入
+        id: verified
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          python3 -B .github/scripts/release_ci.py verify-target \
+            --artifacts-dir "$RUNNER_TEMP/store-artifacts" --target "$TARGET" --github-output "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: temurin
+      - name: 将 Gradle 缓存放到工作区外
+        run: echo "GRADLE_USER_HOME=$RUNNER_TEMP/gradle-user-home" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: true
+      - name: 发布已校验附件（不重新构建）
+        working-directory: ${{ matrix.project }}
+        env:
+          WINDOWS_JAR: ${{ steps.verified.outputs.windows_jar }}
+          LINUX_JAR: ${{ steps.verified.outputs.linux_jar }}
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+        run: |
+          bash ./gradlew publishMods --no-daemon "-Patomchat.publishArtifact=$WINDOWS_JAR"
+          bash ./gradlew publishMods -Patomchat.nativePlatform=linux-x64 --no-daemon "-Patomchat.publishArtifact=$LINUX_JAR"

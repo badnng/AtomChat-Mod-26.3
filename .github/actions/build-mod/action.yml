@@ -1,0 +1,70 @@
+name: Build and verify AtomChat
+description: Build both native variants, test, validate bundled JARs, and retain the exact distribution files.
+inputs:
+  target:
+    description: Target key in versions/targets.json
+    required: true
+  project:
+    description: Gradle project directory
+    required: true
+  java:
+    description: Target JDK
+    required: true
+  artifact-name:
+    description: Actions artifact name
+    required: true
+  cache-read-only:
+    description: Whether Gradle caches must remain read only
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: 将 Gradle 缓存放到工作区外
+      shell: bash
+      run: echo "GRADLE_USER_HOME=$RUNNER_TEMP/gradle-user-home" >> "$GITHUB_ENV"
+    - name: 安装 Skija 的 Linux 系统依赖
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install --no-install-recommends -y libegl1 libgl1
+    - name: 设置目标 JDK
+      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      with:
+        java-version: ${{ inputs.java }}
+        distribution: temurin
+    - name: 设置 Gradle 官方缓存
+      uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      with:
+        cache-read-only: ${{ inputs.cache-read-only }}
+    - name: 构建与测试 Windows / Linux 发行包
+      shell: bash
+      working-directory: ${{ inputs.project }}
+      run: |
+        bash ./gradlew build --no-daemon
+        bash ./gradlew build -Patomchat.nativePlatform=linux-x64 --no-daemon
+    - name: 断言两种产物的内嵌依赖
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+      run: |
+        python3 -B tools/verify_jars.py --platform windows-x64 "$PROJECT"
+        python3 -B tools/verify_jars.py --platform linux-x64 "$PROJECT"
+    - name: 校验构建戳并生成构建信息与 SHA-256
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        TARGET: ${{ inputs.target }}
+        JAVA_VERSION: ${{ inputs.java }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+      run: |
+        python3 -B .github/scripts/build_metadata.py \
+          --project "$PROJECT" --target "$TARGET" --java "$JAVA_VERSION" \
+          --artifact-name "$ARTIFACT_NAME" --output "$RUNNER_TEMP/dist/$TARGET"
+    - name: 保留发行 JAR、校验和与构建信息
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/dist/${{ inputs.target }}/
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 14

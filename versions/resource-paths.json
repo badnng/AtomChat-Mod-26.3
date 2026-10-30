@@ -20,7 +20,7 @@
       "lang_root": "assets/atomchat/lang",
       "note": "Fabric 侧着色器必须落在原版命名空间下"
     },
-    "1.21.1-neoforge": {
+    "26.3-neoforge": {
       "shaders_root": "assets/atomchat/shaders/core",
       "lang_root": "assets/atomchat/lang",
       "note": "ModDevGradle 侧用本模组命名空间"

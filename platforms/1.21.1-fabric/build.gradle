@@ -114,12 +114,21 @@ def changelogFor(version) {
     return sep.find() ? trimmed.substring(sep.end()).trim() : trimmed
 }
 
+// CI can publish the already verified build artifact without rebuilding it.
+def publishArtifactPath = providers.gradleProperty('atomchat.publishArtifact').orNull
+def publishArtifact = publishArtifactPath == null ? null : new File(publishArtifactPath)
+if (publishArtifact != null
+        && (!publishArtifact.isAbsolute() || !publishArtifact.isFile()
+            || !publishArtifact.name.endsWith('.jar'))) {
+    throw new GradleException('atomchat.publishArtifact must be an absolute path to an existing .jar file.')
+}
+
 modrinth {
     token = System.getenv("MODRINTH_TOKEN") ?: ""
     projectId = project.modrinth_project_id
     versionNumber = storeVersion
     versionType = "release"
-    uploadFile = remapJar
+    uploadFile = publishArtifact ?: remapJar
     gameVersions = [project.minecraft_version]
     loaders = ["fabric"]
     changelog = changelogFor(project.version)
@@ -129,8 +138,13 @@ modrinth {
     }
 }
 
+def mrProjectId = (project.findProperty('modrinth_project_id') ?: '').toString()
 tasks.named('modrinth') {
-    onlyIf { System.getenv("MODRINTH_TOKEN") }
+    if (publishArtifact != null) {
+        // Minotaur 2.8.7 unconditionally adds assemble, even for a File upload.
+        setDependsOn([])
+    }
+    onlyIf { System.getenv("MODRINTH_TOKEN") && !mrProjectId.isEmpty() && mrProjectId != 'UNSET' }
 }
 
 def cfProjectId = (project.findProperty('curseforge_project_id') ?: '').toString()
@@ -141,7 +155,7 @@ tasks.register('curseforge', net.darkhax.curseforgegradle.TaskPublishCurseForge)
     onlyIf { cfConfigured && System.getenv("CURSEFORGE_TOKEN") }
 
     if (cfConfigured) {
-        def main = upload(cfProjectId as int, remapJar)
+        def main = upload(cfProjectId as int, publishArtifact ?: remapJar)
         main.changelogType = 'markdown'
         main.changelog = changelogFor(project.version)
         main.releaseType = 'release'

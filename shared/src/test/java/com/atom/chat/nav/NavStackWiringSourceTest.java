@@ -9,6 +9,8 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -44,7 +46,7 @@ class NavStackWiringSourceTest {
     private static final List<String> SCREENS = List.of(
             "platforms/1.20.1-forge/src/main/java/com/atom/chat/screen/AtomChatScreen.java",
             "platforms/1.21.1-fabric/src/main/java/net/minecraft/client/gui/screen/AtomChatScreen.java",
-            "platforms/1.21.1-neoforge/src/main/java/com/atom/chat/screen/AtomChatScreen.java");
+            "platforms/26.3-neoforge/src/main/java/com/atom/chat/screen/AtomChatScreen.java");
 
     /** The controller itself, so the steps the port cannot observe stay pinned. */
     private static final String CONTROLLER =
@@ -157,6 +159,27 @@ class NavStackWiringSourceTest {
         int to = source.indexOf("\n    }", from);
         assertTrue(to > from, "closing brace not found for " + declaration);
         return source.substring(from, to);
+    }
+
+    /** Selects the public screen constructor that directly creates the controller. */
+    private static String controllerConstructor(String source, String screen) {
+        Matcher constructors = Pattern.compile("public AtomChatScreen\\([^)]*\\)\\s*\\{")
+                .matcher(source);
+        String selected = null;
+        while (constructors.find()) {
+            String match = constructors.group();
+            String declaration = match.substring(0, match.lastIndexOf('{')).trim();
+            String candidate = body(source, declaration);
+            if (!candidate.contains("new NavStackController(navHost,")) {
+                continue;
+            }
+            assertTrue(selected == null,
+                    screen + ": more than one public constructor builds the navigation controller");
+            selected = candidate;
+        }
+        assertTrue(selected != null,
+                screen + ": no public constructor builds the navigation controller");
+        return selected;
     }
 
     /**
@@ -335,10 +358,10 @@ class NavStackWiringSourceTest {
             String src = source(screen);
             assertEquals(1, occurrences(src, "new NavStackController(navHost,"),
                     screen + ": expected exactly one construction of the controller");
-            String ctor = body(src, "public AtomChatScreen(String originalChatText, AtomChatOpenMode mode)");
-            assertTrue(ctor.contains("new NavStackController(navHost,"),
-                    screen + ": the controller must be built in the constructor, where every field"
-                            + " the port reads is already initialised.\n" + ctor);
+            String ctor = controllerConstructor(src, screen);
+            assertTrue(ctor.contains("this.navStack = new NavStackController(navHost,"),
+                    screen + ": the controller must initialise the navStack field in the constructor,"
+                            + " where every field the port reads is already initialised.\n" + ctor);
         }
     }
 

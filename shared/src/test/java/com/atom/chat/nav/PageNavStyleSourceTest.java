@@ -69,7 +69,7 @@ class PageNavStyleSourceTest {
     private static final List<String> SCREENS = List.of(
             "platforms/1.20.1-forge/src/main/java/com/atom/chat/screen/AtomChatScreen.java",
             "platforms/1.21.1-fabric/src/main/java/net/minecraft/client/gui/screen/AtomChatScreen.java",
-            "platforms/1.21.1-neoforge/src/main/java/com/atom/chat/screen/AtomChatScreen.java");
+            "platforms/26.3-neoforge/src/main/java/com/atom/chat/screen/AtomChatScreen.java");
 
     /**
      * One slide-offset declaration: {@code float fromDx = popping ? A : B;} —

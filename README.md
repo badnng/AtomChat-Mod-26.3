@@ -29,10 +29,10 @@ A client-side mod that replaces the vanilla chat screen with a vector-drawn phon
 | Target | Requires |
 | --- | --- |
 | Fabric 1.21.1 | Fabric Loader 0.16+, Fabric API |
-| NeoForge 1.21.1 | NeoForge 21.1+ |
+| NeoForge 26.3 | NeoForge 26.3.0.99+ |
 | Forge 1.20.1 | Forge 47+ |
 
-Java 21 for the 1.21.1 targets, Java 17 for Forge 1.20.1. **Windows x64 and Linux x64 have separate JARs.** Choose exactly one for your OS; Linux files contain `linux-x64` in the name. Each JAR bundles only its matching Skija native. Linux needs EGL/OpenGL libraries (Ubuntu/Debian: `sudo apt install libegl1 libgl1`). All three targets work client-side; install the same jar on the server for media hosting and profile synchronization.
+Java 25 for NeoForge 26.3, Java 21 for Fabric 1.21.1, and Java 17 for Forge 1.20.1. **Windows x64 and Linux x64 have separate JARs.** Choose exactly one for your OS; Linux files contain `linux-x64` in the name. Each JAR bundles only its matching Skija native. Linux needs EGL/OpenGL libraries (Ubuntu/Debian: `sudo apt install libegl1 libgl1`). All three targets work client-side; install the same jar on the server for media hosting and profile synchronization.
 
 ## Configuration
 
@@ -66,8 +66,13 @@ Server policy lives in config/atomchat/atomchat-server.json, including hostingEn
 Single-branch multi-target layout: `shared/` holds mapping-neutral logic, `layers/mapping/official/` the official-mappings layer, and `platforms/<target>/` one Gradle project per target.
 
 ```bash
-cd platforms/1.21.1-fabric && ./gradlew build    # JDK 21; other targets: change directory, Forge 1.20.1 uses JDK 17
+cd platforms/26.3-neoforge
+./gradlew build    # JDK 25; Fabric 1.21.1 uses JDK 21, Forge 1.20.1 uses JDK 17
 ```
+
+The NeoForge development probe starts a hidden client and an isolated integrated server, executes functional assertions, writes a JSON report, and exits. From the repository root, run `python tools/run_neoforge_automation.py --java-home <JDK25>`. Skipped scenarios make the report partial and produce a nonzero exit status; see [the automation guide](platforms/26.3-neoforge/src/automation/README.md).
+
+The 26.3 port's measured results, artifact hashes and untested cases are recorded in the [verification report](docs/verification/2026-10-31-neoforge-26.3.json).
 
 See the [wiki](https://github.com/NoWordz/AtomChat-Mod/wiki) for details.
 

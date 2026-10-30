@@ -27,7 +27,6 @@
     "跟实测值长得一模一样。把猜的字段名列出来，接手的人一眼就知道哪几个要自己查过再改；",
     "buildable: true 的目标不许留 unverified（CI 会拦）。"
   ],
-
   "1.21.1-fabric": {
     "minecraft": "1.21.1",
     "loader": "Fabric",
@@ -38,7 +37,10 @@
     "gradle": "8.8",
     "project": "platforms/1.21.1-fabric",
     "buildable": true,
-    "layers": ["1.21+", "fabric"],
+    "layers": [
+      "1.21+",
+      "fabric"
+    ],
     "note": "唯一用 Yarn 映射的目标：不挂 layers/mapping/official/，自己保留 33 个 main + 12 个 test 的 Yarn 名副本（与官方名那份路径一一对应）。"
   },
   "1.21.1-neoforge": {
@@ -50,9 +52,13 @@
     "java": 21,
     "gradle": "9.2.1",
     "project": "platforms/1.21.1-neoforge",
-    "buildable": true,
-    "layers": ["1.21+", "official", "neoforge"],
-    "note": "ModDevGradle。未挂 Parchment（它只补参数名，不影响能不能编过）。配置缓存已开。"
+    "buildable": false,
+    "layers": [
+      "1.21+",
+      "official",
+      "neoforge"
+    ],
+    "note": "NeoForge 工程已迁移到 Minecraft 26.3；不再构建或发布 1.21.1 NeoForge。"
   },
   "1.20.1-forge": {
     "minecraft": "1.20.1",
@@ -64,10 +70,12 @@
     "gradle": "8.8",
     "project": "platforms/1.20.1-forge",
     "buildable": true,
-    "layers": ["official", "forge"],
+    "layers": [
+      "official",
+      "forge"
+    ],
     "note": "Java 17 与 Gradle 8.8 是硬约束（ForgeGradle 6 不吃 Gradle 9）。运行时是 SRG 名，refmap 由 ForgeGradle 生成。只挂 official 映射层，不挂 1.21+ 版本层。"
   },
-
   "1.21.1-forge": {
     "minecraft": "1.21.1",
     "loader": "Forge",
@@ -78,8 +86,16 @@
     "gradle": "8.8",
     "project": "platforms/1.21.1-forge",
     "buildable": false,
-    "layers": ["1.21+", "official", "forge"],
-    "unverified": ["loader_version", "java", "gradle"],
+    "layers": [
+      "1.21+",
+      "official",
+      "forge"
+    ],
+    "unverified": [
+      "loader_version",
+      "java",
+      "gradle"
+    ],
     "note": "没做，也先不做：1.21.1 的 Forge 目标现在没有需求。此条目的意义是让「这个组合没做」在这里看得见。真要做时：工程目录建起来 CI 就会编它，loader_version / java / gradle 三个值按实测定，然后把 unverified 清掉。"
   },
   "1.20.1-fabric": {
@@ -92,8 +108,14 @@
     "gradle": "8.8",
     "project": "platforms/1.20.1-fabric",
     "buildable": false,
-    "layers": ["fabric"],
-    "unverified": ["loader_version", "java", "gradle"],
+    "layers": [
+      "fabric"
+    ],
+    "unverified": [
+      "loader_version",
+      "java",
+      "gradle"
+    ],
     "note": "没做，也先不做：1.20.1 上玩家主要走 Forge。要做时注意它同样走 Yarn 家族，因此也不挂 official 映射层。"
   },
   "1.20.1-neoforge": {
@@ -106,8 +128,107 @@
     "gradle": "8.8",
     "project": "platforms/1.20.1-neoforge",
     "buildable": false,
-    "layers": ["official", "neoforge"],
-    "unverified": ["loader_version", "java", "gradle"],
+    "layers": [
+      "official",
+      "neoforge"
+    ],
+    "unverified": [
+      "loader_version",
+      "java",
+      "gradle"
+    ],
     "note": "没做，也先不做。1.20.1 的 NeoForge 是 20.4 线，与 1.21.1 的 NeoForge 不是一批 API；要做时先把这个目标的 layers 重新量一遍。"
+  },
+  "26.3-neoforge": {
+    "minecraft": "26.3",
+    "loader": "NeoForge",
+    "loader_version": "26.3.0.99",
+    "server_config_sync": true,
+    "mappings": "official",
+    "java": 25,
+    "gradle": "9.2.1",
+    "project": "platforms/26.3-neoforge",
+    "buildable": true,
+    "layers": [
+      "1.21+",
+      "official",
+      "neoforge"
+    ],
+    "note": "ModDevGradle 2.0.148，Java 25；26.3 专属适配通过显式 source_overrides 隔离旧目标。",
+    "source_overrides": [
+      "src/main/java/com/atom/chat/chat/ChatClassifier.java",
+      "src/main/java/com/atom/chat/chat/ChatPipeline.java",
+      "src/main/java/com/atom/chat/chat/PrivateChatParser.java",
+      "src/main/java/com/atom/chat/chat/SendPipeline.java",
+      "src/main/java/com/atom/chat/chat/TellClickDetector.java",
+      "src/main/java/com/atom/chat/image/AvatarRenderer.java",
+      "src/main/java/com/atom/chat/image/DragDropPasteUpload.java",
+      "src/main/java/com/atom/chat/image/ImageLoader.java",
+      "src/main/java/com/atom/chat/image/NativeDialogBridge.java",
+      "src/main/java/com/atom/chat/mixin/ChatInputSuggestorAccessor.java",
+      "src/main/java/com/atom/chat/mixin/MessageHandlerMixin.java",
+      "src/main/java/com/atom/chat/mixin/MinecraftClientMixin.java",
+      "src/main/java/com/atom/chat/mixin/MouseHandlerAccessor.java",
+      "src/main/java/com/atom/chat/mixin/SuggestionWindowAccessor.java",
+      "src/main/java/com/atom/chat/net/ConfigScreenClient.java",
+      "src/main/java/com/atom/chat/page/ConversationListPage.java",
+      "src/main/java/com/atom/chat/render/GlStateUtil.java",
+      "src/main/java/com/atom/chat/render/RichTextRenderer.java",
+      "src/main/java/com/atom/chat/render/SkiaGraphics.java",
+      "src/main/java/com/atom/chat/screen/SuggestorWiring.java",
+      "src/main/java/com/atom/chat/settings/SettingsActions.java",
+      "src/main/java/com/atom/chat/settings/SettingsSectionPage.java",
+      "src/main/java/com/atom/chat/text/RichText.java",
+      "src/main/java/com/atom/chat/util/FilePicker.java",
+      "src/test/java/com/atom/chat/chat/ChatMessageTest.java",
+      "src/test/java/com/atom/chat/chat/MentionHighlighterTest.java",
+      "src/test/java/com/atom/chat/chat/RichChatPartsTest.java",
+      "src/test/java/com/atom/chat/image/DragDropPasteUploadTest.java",
+      "src/test/java/com/atom/chat/text/RichTextTest.java",
+      "src/test/java/com/atom/chat/text/RichTextTestExtra.java"
+    ]
+  },
+  "26.3-fabric": {
+    "minecraft": "26.3",
+    "loader": "Fabric",
+    "loader_version": null,
+    "server_config_sync": true,
+    "mappings": "yarn",
+    "java": 25,
+    "gradle": "9.2.1",
+    "project": "platforms/26.3-fabric",
+    "buildable": false,
+    "layers": [
+      "1.21+",
+      "fabric"
+    ],
+    "unverified": [
+      "loader_version",
+      "java",
+      "gradle"
+    ],
+    "note": "本次仅迁移 NeoForge；该加载器目标不创建工程、不构建、不发布。"
+  },
+  "26.3-forge": {
+    "minecraft": "26.3",
+    "loader": "Forge",
+    "loader_version": null,
+    "server_config_sync": true,
+    "mappings": "official",
+    "java": 25,
+    "gradle": "9.2.1",
+    "project": "platforms/26.3-forge",
+    "buildable": false,
+    "layers": [
+      "1.21+",
+      "official",
+      "forge"
+    ],
+    "unverified": [
+      "loader_version",
+      "java",
+      "gradle"
+    ],
+    "note": "本次仅迁移 NeoForge；该加载器目标不创建工程、不构建、不发布。"
   }
 }

@@ -1,0 +1,18 @@
+# Development-only metadata. This source set is absent from release artifacts.
+license="MIT"
+
+[[mods]]
+modId="atomchat_automation"
+version="1"
+displayName="AtomChat Development Automation"
+description="Isolated client automation and hidden-window probes."
+
+[[mixins]]
+config="atomchat-automation.mixins.json"
+
+[[dependencies.atomchat_automation]]
+modId="atomchat"
+type="required"
+versionRange="[0,)"
+ordering="AFTER"
+side="CLIENT"

@@ -1,0 +1,208 @@
+{
+  "schema": 1,
+  "date_shanghai": "2026-10-31",
+  "recorded_utc": "2026-10-30T19:45:53.846961+00:00",
+  "summary_zh": "仅将 NeoForge 目标升级至 Minecraft 26.3。单元测试、12页离屏对照、真实单人内部服务器、发布JAR双客户端及专服启动检查已完成；明确跳过的场景没有计作通过。",
+  "status": "VERIFIED_WITH_EXPLICIT_LIMITATIONS",
+  "target": {
+    "project": "platforms/26.3-neoforge",
+    "minecraft": "26.3",
+    "neoforge": "26.3.0.99",
+    "mod_version": "0.3.0",
+    "java": 25,
+    "moddevgradle": "2.0.148",
+    "gradle": "9.2.1"
+  },
+  "unchanged_production_roots": [
+    "platforms/1.21.1-fabric",
+    "platforms/1.20.1-forge",
+    "shared/src/main/java",
+    "layers/mapping/official/src/main/java"
+  ],
+  "builds": {
+    "neoforge_windows": {
+      "result": "PASS",
+      "unit_tests": {
+        "suites": 171,
+        "tests": 1325,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 2
+      },
+      "log": ".work/neoforge-build-3.log"
+    },
+    "fabric_1.21.1": {
+      "result": "PASS",
+      "unit_tests": {
+        "suites": 167,
+        "tests": 1306,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 2
+      },
+      "log": ".work/fabric-regression.log"
+    },
+    "forge_1.20.1": {
+      "result": "PASS",
+      "unit_tests": {
+        "suites": 164,
+        "tests": 1294,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 2
+      },
+      "log": ".work/forge-regression.log"
+    },
+    "neoforge_linux": {
+      "result": "PASS",
+      "mode": "cross-compiled assemble; no Linux game/native execution",
+      "log": ".work/neoforge-linux-assemble.log"
+    }
+  },
+  "regressions": {
+    "original_neoforge_1.21.1": {
+      "suites": 164,
+      "tests": 1294,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2
+    },
+    "additional_neoforge_tests": 31,
+    "golden_comparison": {
+      "pages": 12,
+      "result": "PASS",
+      "png_byte_identical": true,
+      "differing_pixels": 0,
+      "scope": "deterministic CPU raster pages; not whole-game GPU frame comparison",
+      "log": ".work/new-golden-compare.log"
+    },
+    "python_guard_unit_tests": {
+      "tests": 19,
+      "failures": 0,
+      "environment": "PYTHONUTF8=1 and PYTHONIOENCODING=utf-8 on Windows",
+      "log": ".work/python-guards-tests-utf8.log"
+    },
+    "matrix_log_assets_and_nested_dependencies": "PASS"
+  },
+  "runtime": {
+    "single_integrated_server": {
+      "raw_status": "PARTIAL",
+      "checks": {
+        "PASS": 155,
+        "SKIP": 11
+      },
+      "report": "platforms/26.3-neoforge/build/automation-20261031-033933-53756/report.json",
+      "graphics_frames": 807,
+      "world_blur_captures": 215,
+      "visible_catalog_switches_checked": 23,
+      "panel_pngs": 29,
+      "game_and_gradle_exit": 0,
+      "wrapper_exit": 3,
+      "wrapper_exit_reason": "explicit SKIP checks; never counted as passed"
+    },
+    "pair_from_published_windows_jar": {
+      "raw_status": "PARTIAL",
+      "report": "platforms/26.3-neoforge/build/automation-pair-20261031-033740-92980/pair-report.json",
+      "artifact_mode": "published-jar",
+      "sha256": "821b3d4bf5b2a90a0e90ff453d5975cf0ed7dfb356fbdc84b5262d3974cfdcc6",
+      "roles": {
+        "host": {
+          "checks": {
+            "PASS": 61,
+            "SKIP": 3
+          },
+          "java_exit": 0,
+          "loaded_mod": "D:\\OA模组开发\\AtomChat-Mod-26.3\\platforms\\26.3-neoforge\\build\\libs\\atomchat-NeoForge-26.3-0.3.0.jar",
+          "runtime_dependency_origins": {
+            "io.github.humbleui.skija.Image": "D:\\OA模组开发\\AtomChat-Mod-26.3\\platforms\\26.3-neoforge\\build\\automation-pair-20261031-033740-92980\\automation-host\\.cache\\jij\\56f4b2afa6ac99903d85cb533da01d9b9b9e1144e366e827473be9f498a549e3\\skija-shared-0.116.8.jar",
+            "io.github.humbleui.types.Rect": "D:\\OA模组开发\\AtomChat-Mod-26.3\\platforms\\26.3-neoforge\\build\\automation-pair-20261031-033740-92980\\automation-host\\.cache\\jij\\d9d845e44c6d277e19ee8d0ab624d30ed05529b43976a890530184e508d62f5f\\types-0.1.2.jar",
+            "com.atom.chat.shaded.flatlaf.FlatLaf": "D:\\OA模组开发\\AtomChat-Mod-26.3\\platforms\\26.3-neoforge\\build\\automation-pair-20261031-033740-92980\\automation-host\\.cache\\jij\\de20503c2fc5000e4487c7b202d30a1e9735a70f3dc136b11b8579fb3b7b4553\\flatlaf-atomchat-3.7.2.jar"
+          },
+          "unrelocated_flatlaf_hidden": true
+        },
+        "peer": {
+          "checks": {
+            "PASS": 60,
+            "SKIP": 3
+          },
+          "java_exit": 0,
+          "loaded_mod": "D:\\OA模组开发\\AtomChat-Mod-26.3\\platforms\\26.3-neoforge\\build\\libs\\atomchat-NeoForge-26.3-0.3.0.jar",
+          "runtime_dependency_origins": {
+            "io.github.humbleui.skija.Image": "D:\\OA模组开发\\AtomChat-Mod-26.3\\platforms\\26.3-neoforge\\build\\automation-pair-20261031-033740-92980\\automation-peer\\.cache\\jij\\56f4b2afa6ac99903d85cb533da01d9b9b9e1144e366e827473be9f498a549e3\\skija-shared-0.116.8.jar",
+            "io.github.humbleui.types.Rect": "D:\\OA模组开发\\AtomChat-Mod-26.3\\platforms\\26.3-neoforge\\build\\automation-pair-20261031-033740-92980\\automation-peer\\.cache\\jij\\d9d845e44c6d277e19ee8d0ab624d30ed05529b43976a890530184e508d62f5f\\types-0.1.2.jar",
+            "com.atom.chat.shaded.flatlaf.FlatLaf": "D:\\OA模组开发\\AtomChat-Mod-26.3\\platforms\\26.3-neoforge\\build\\automation-pair-20261031-033740-92980\\automation-peer\\.cache\\jij\\de20503c2fc5000e4487c7b202d30a1e9735a70f3dc136b11b8579fb3b7b4553\\flatlaf-atomchat-3.7.2.jar"
+          },
+          "unrelocated_flatlaf_hidden": true
+        }
+      },
+      "wrapper_exit": 3,
+      "wrapper_exit_reason": "explicit SKIP checks; both Java processes exit naturally with 0"
+    },
+    "dedicated_server": {
+      "result": "PASS",
+      "report": "platforms/26.3-neoforge/build/automation-dedicated-20261031-025806-89496/server-report.json",
+      "mode": "development main outputs, dedicated distribution, --nogui, no automation mod",
+      "checks_passed": 8,
+      "java_exit": 0
+    }
+  },
+  "verified_flows_zh": [
+    "单人世界自动创建、真实玩家加入、保存、断连清理、原世界重进和精确历史重载",
+    "原生聊天入口、公聊和私聊双向收发、私聊与公聊隔离、草稿保留、首次退格和隐私隔离",
+    "真实鼠标发送、表情/短语面板、全部可见设置开关点击/持久化/还原、全部内置主题绘制",
+    "背景模糊GPU读回、实际GUI呈现、头像/壁纸/横幅裁剪确认和像素结果",
+    "托管PNG/GIF上传下载、真实图片解码和GIF帧变化、资料签名及头像/横幅双向发布/取回/清除",
+    "反应往返、真实poke载荷、动画状态和实际音频通道、通知收取/绘制/过期/禁用门",
+    "服务端表情包manifest/chunk/hash校验、完整和增量同步、房主可编辑和LAN访客拒绝",
+    "发布JAR及其内嵌Skija/Types/私有FlatLaf的真实加载、正常JVM退出",
+    "真正专用服务器发行侧加载、命令注册、控制台玩家守卫、stop保存退出"
+  ],
+  "neoforge_only_fixes_zh": [
+    "适配26.3的SDL输入、GuiGraphicsExtractor/RenderPearl、组件records和新版网络/权限API",
+    "Skia CPU栅格经新版纹理接口提交，保持背景模糊并隔离旧Forge实现",
+    "保留/say和/me服务端广播，避免自身身份导致消息被过滤",
+    "恢复RunCommand等富文本点击、Shift insertion和仅insertion的命中区域",
+    "阻止私聊草稿进入原生公聊草稿，恢复首次打开的会话草稿并保护resize现场",
+    "图片加载池改为后台线程，解决图片加载后游戏已保存关闭却无法退出",
+    "保存/刷新时重新检查权限，免作弊豁免仅适用于真正单人房主",
+    "修复中文工作区下Gradle/JVM参数编码，Java源码与资源仍明确UTF-8"
+  ],
+  "limitations_zh": [
+    "不能宣称所有场景100%验证；运行报告保留PARTIAL和逐项SKIP。",
+    "操作系统文件对话框、系统剪贴板和IME实机交互未自动化验证。",
+    "外部图床、无模组客户端/服务端降级和异常网络中断场景未真实验证。",
+    "部分滑条/颜色/破坏性设置手势、跨消息拖选和全部表情条目编辑手势未完整验证。",
+    "验证了实际音频通道和动画状态，未判断肉耳听感及完整逐帧轨迹。",
+    "12页像素对照覆盖CPU页图，不是全游戏GPU逐像素对照；未做性能基准。",
+    "实际游戏运行验证为Windows x64/OpenGL；Linux仅交叉打包，Vulkan未实跑。",
+    "SDL隐藏窗口测试仍需要可用图形驱动与桌面会话；专用服务器烟测为真正--nogui。",
+    "原版不存在自动推送表情包功能；验证的是其原有join/resync拉取协议。"
+  ],
+  "artifacts": [
+    {
+      "platform": "windows-x64",
+      "path": "platforms/26.3-neoforge/build/libs/atomchat-NeoForge-26.3-0.3.0.jar",
+      "bytes": 17769537,
+      "sha256": "821b3d4bf5b2a90a0e90ff453d5975cf0ed7dfb356fbdc84b5262d3974cfdcc6",
+      "automation_classes_or_metadata_included": false
+    },
+    {
+      "platform": "linux-x64",
+      "path": "platforms/26.3-neoforge/build/linux-x64/libs/atomchat-NeoForge-26.3-linux-x64-0.3.0.jar",
+      "bytes": 20130340,
+      "sha256": "53dc5b52c256c3f918caf14a042b93f8dfaea8e406a25ba8366e0d8608ae32da",
+      "automation_classes_or_metadata_included": false
+    }
+  ],
+  "reproduce": [
+    "platforms/26.3-neoforge/gradlew.bat -p platforms/26.3-neoforge build --no-daemon",
+    "python tools/run_neoforge_automation.py --java-home <JDK25>",
+    "python tools/run_neoforge_pair.py --java-home <JDK25> --mod-jar platforms/26.3-neoforge/build/libs/atomchat-NeoForge-26.3-0.3.0.jar",
+    "python tools/run_neoforge_server_smoke.py --java-home <JDK25>"
+  ],
+  "cleanup": {
+    "temporary_Q_drive_mapping_removed": true,
+    "all_final_game_processes_exited_naturally": true,
+    "fixture_worlds_and_logs_retained_under_build": true
+  }
+}

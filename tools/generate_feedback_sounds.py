@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RATE = 48000
 SOURCE = ROOT / 'tools/audio-source/bubble-pop.wav'
 PREVIEW = ROOT / '.tmp/chat-effects/bubble-revision/audio'
-PLATFORMS = ('1.21.1-fabric', '1.21.1-neoforge', '1.20.1-forge')
+PLATFORMS = ('1.21.1-fabric', '26.3-neoforge', '1.20.1-forge')
 
 
 def lowpass(samples, cutoff):

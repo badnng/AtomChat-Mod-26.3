@@ -53,7 +53,7 @@ class AboutHeroAssetTest {
     private static final List<String> PLATFORMS = List.of(
             "platforms/1.20.1-forge",
             "platforms/1.21.1-fabric",
-            "platforms/1.21.1-neoforge");
+            "platforms/26.3-neoforge");
 
     /**
      * The hero renderer, one copy per mapping family: Fabric keeps the Yarn

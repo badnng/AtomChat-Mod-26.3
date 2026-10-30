@@ -118,6 +118,7 @@ def check_targets(targets: dict, layers: dict, aliases: dict) -> None:
                     fail(f"目标 {name} 的工程目录缺 {needed}")
             check_platform_identity(name, project)
             check_platform_toolchain(name, project, t)
+            check_source_overrides(name, project, t, layers)
 
     # 映射家族不止一个时（本仓就是：Fabric 走 Yarn，另两端走官方名），
     # 每个【有两个以上成员在建】的家族都要有对应的映射层 —— 那种家族里的平行副本是可共享的，
@@ -163,6 +164,32 @@ def check_targets(targets: dict, layers: dict, aliases: dict) -> None:
             rel = f"platforms/{child.name}"
             if rel not in declared:
                 fail(f"{rel} 存在但不在 targets.json 里 —— 那样它是一份没有任何地方编的源码")
+
+
+def check_source_overrides(name: str, project: pathlib.Path, t: dict, layers: dict) -> None:
+    """Require an unambiguous inherited Java source and a platform replacement."""
+    overrides = t.get("source_overrides", [])
+    if (not isinstance(overrides, list) or any(not isinstance(p, str) for p in overrides)
+            or len(set(overrides)) != len(overrides)):
+        fail(f"目标 {name} 的 source_overrides 必须是不重复的路径列表")
+        return
+    inherited: dict[str, list[pathlib.Path]] = {}
+    bases = [ROOT / "shared"] + [layer_dir(n, layers[n]) for n in t["layers"] if n in layers]
+    for base in bases:
+        for kind in ("main", "test"):
+            source_root = base / "src" / kind / "java"
+            for source in source_root.rglob("*.java"):
+                rel = f"src/{kind}/java/{source.relative_to(source_root).as_posix()}"
+                inherited.setdefault(rel, []).append(source)
+    for rel in overrides:
+        if not re.fullmatch(r"src/(main|test)/java/(?:[A-Za-z_$][A-Za-z0-9_$]*/)*[A-Za-z_$][A-Za-z0-9_$]*\.java", rel):
+            fail(f"目标 {name} 的 source_overrides 路径非法：{rel}")
+            continue
+        if not (project / rel).is_file() or len(inherited.get(rel, [])) != 1:
+            fail(f"目标 {name} 的覆盖 {rel} 必须有平台实现和恰好一个继承源文件")
+    for rel, sources in inherited.items():
+        if len(sources) > 1 or ((project / rel).is_file() and rel not in overrides):
+            fail(f"目标 {name} 存在未声明或歧义的重复源文件：{rel}")
 
 
 def check_platform_identity(name: str, project: pathlib.Path) -> None:

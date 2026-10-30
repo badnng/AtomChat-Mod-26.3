@@ -148,6 +148,42 @@ mounted.each { name ->
 }
 
 // ---- 3. 接进源集 ----
+// A target may replace an inherited class only through an explicit declaration.
+// Match the actual inherited file, not its relative path: a global exclude
+// would also remove the platform implementation at that same path.
+def overrides = targetDef.source_overrides ?: []
+if (!(overrides instanceof List) || overrides.any { !(it instanceof String) }
+        || overrides.toSet().size() != overrides.size()) {
+    throw new GradleException("${targetName}: source_overrides 必须是不重复的路径列表")
+}
+def inheritedFiles = [:].withDefault { [] }
+[new File(repoRoot, 'shared')] .plus(mounted.collect { layerDir(it as String) }).each { base ->
+    ['main', 'test'].each { kind ->
+        def root = new File(base, "src/${kind}/java")
+        if (root.isDirectory()) {
+            fileTree(root).matching { include '**/*.java' }.files.each { source ->
+                def rel = "src/${kind}/java/" + root.toPath().relativize(source.toPath()).toString().replace('\\', '/')
+                inheritedFiles[rel] << source.canonicalFile
+            }
+        }
+    }
+}
+def overriddenFiles = [] as Set
+overrides.each { rel ->
+    if (!(rel ==~ /src\/(main|test)\/java\/(?:[A-Za-z_$][A-Za-z0-9_$]*\/)*[A-Za-z_$][A-Za-z0-9_$]*\.java/)) {
+        throw new GradleException("${targetName}: 非法 source_overrides 路径 ${rel}")
+    }
+    if (!new File(projectDir, rel).isFile() || inheritedFiles[rel].size() != 1) {
+        throw new GradleException("${targetName}: 覆盖 ${rel} 必须有平台实现和恰好一个继承源文件")
+    }
+    overriddenFiles.addAll(inheritedFiles[rel])
+}
+inheritedFiles.each { rel, files ->
+    if (files.size() > 1 || (new File(projectDir, rel).isFile() && !overrides.contains(rel))) {
+        throw new GradleException("${targetName}: 未声明或歧义的重复源文件 ${rel}")
+    }
+}
+
 if (project.extensions.findByName('sourceSets') == null) {
     throw new GradleException("目标 ${targetName} 的构建脚本没有 java 插件 —— 共享层源集无处可接")
 }
@@ -155,6 +191,8 @@ sourceSets.main.java.srcDirs += mainJava
 sourceSets.main.resources.srcDirs += mainRes
 sourceSets.test.java.srcDirs += testJava
 sourceSets.test.resources.srcDirs += testRes
+sourceSets.main.java.exclude { element -> overriddenFiles.contains(element.file.canonicalFile) }
+sourceSets.test.java.exclude { element -> overriddenFiles.contains(element.file.canonicalFile) }
 
 // ---- 3b. 内嵌的 FlatLaf（重定位产物，随仓库分发） ----
 //

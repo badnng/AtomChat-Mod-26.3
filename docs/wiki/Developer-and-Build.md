@@ -17,7 +17,7 @@ layers/
   mapping/official/            # shared by the official-mappings family (NeoForge + Forge)
   version/  loader/            # version and loader layers (empty today - see "why there is no version layer yet")
 platforms/
-  1.21.1-fabric/  1.21.1-neoforge/  1.20.1-forge/   # each target's own code, build script, metadata and resources
+  1.21.1-fabric/  26.3-neoforge/  1.20.1-forge/   # each target's own code, build script, metadata and resources
 tools/verify_targets.py        # the matrix and identity guard (local and CI run the same file)
 docs/                          # store copy, plus the sources of this wiki
 ```
@@ -28,28 +28,28 @@ Current size of each project:
 
 | Project | main | test | Contents |
 |---|---:|---:|---|
-| `shared/` | 103 | 57 | Shared by all three targets |
-| `layers/mapping/official/` | 37 | 13 | Shared by NeoForge + Forge |
-| `platforms/1.21.1-fabric/` | 60 | 16 | Including 48 Yarn-named twin copies |
-| `platforms/1.21.1-neoforge/` | 23 | 3 | |
-| `platforms/1.20.1-forge/` | 23 | 3 | |
+| `shared/` | 178 | 137 | Shared by all three targets |
+| `layers/mapping/official/` | 44 | 24 | Shared by NeoForge + Forge |
+| `platforms/1.21.1-fabric/` | 81 | 31 | Including 48 Yarn-named twin copies |
+| `platforms/26.3-neoforge/` | 64 | 17 | |
+| `platforms/1.20.1-forge/` | 37 | 4 | |
 
 ## Building and testing
 
 Run these inside the **target's own project directory**, not the repository root:
 
 ```bash
-cd platforms/1.21.1-neoforge
-./gradlew build      # build + tests; output under platforms/1.21.1-neoforge/build/libs/
+cd platforms/26.3-neoforge
+./gradlew build      # build + tests; output under platforms/26.3-neoforge/build/libs/
 ./gradlew runClient  # dev client (the Fabric and Forge targets work the same way)
 ./gradlew atomchatLayers   # print which layers this target mounts and which source dirs that pulls in
 ```
 
-- The Fabric and NeoForge targets use **JDK 21**; Forge 1.20.1 uses **JDK 17**;
+- NeoForge 26.3 uses **JDK 25**; Fabric 1.21.1 uses **JDK 21**; Forge 1.20.1 uses **JDK 17**;
 - the Forge target additionally produces a `-slim` jar (no bundled dependencies, development only) — **release the one without `-slim`**;
 - the version number lives in exactly one place, the repository root `gradle.properties`; no platform defines it (a platform that cannot read it fails outright rather than falling back to a default).
 
-The tests are **JUnit 5** and cover **pure logic only** (no game boot needed): animation timing and easing, layout maths, message parsing and classification, emote storage, file-name sanitising, AWT state decisions, server emote migration, @mention highlighting, and the wire format itself. Currently **505 tests per target** (the same suite runs once for each). The Windows variant retains the test-scoped Linux native for CI; the Linux variant bundles it. Build Linux with `./gradlew build -Patomchat.nativePlatform=linux-x64 --no-daemon`; outputs are isolated in `build/linux-x64/libs/`. Store versions are separate OS alternatives; Linux labels append `-linux-x64`. Install only one.
+The **JUnit 5** suite covers pure logic and CPU raster rendering: animation timing and easing, layout maths, message parsing and classification, emote storage, file-name sanitising, AWT state decisions, server emote migration, @mention highlighting, and the wire format itself. Run `test` for the current counts; target-specific adapters add their own regressions. NeoForge also has hidden-client integrated-server and two-client probes in `src/automation`; these start real game processes and report skipped scenarios explicitly. The Windows variant retains the test-scoped Linux native for CI; the Linux variant bundles it. Build Linux with `./gradlew build -Patomchat.nativePlatform=linux-x64 --no-daemon`; outputs are isolated in `build/linux-x64/libs/`. Store versions are separate OS alternatives; Linux labels append `-linux-x64`. Install only one.
 
 ## The layering rules
 
@@ -69,11 +69,13 @@ A layer pays off when several targets share one cell. Today's cells:
 
 | Cell | Members |
 |---|---|
-| 1.21.1 + official | NeoForge (the only one) |
+| 26.3 + official | NeoForge (the only one) |
 | 1.21.1 + yarn | Fabric (the only one) |
 | 1.20.1 + official | Forge (the only one) |
 
 With one member per cell, moving code into a version or loader layer shares nothing and only adds a directory level. The layers will appear on their own once a second target lands in an occupied cell (1.20.1-fabric, say).
+
+NeoForge 26.3 keeps API adaptations in its platform directory. `source_overrides` in `versions/targets.json` declares each inherited Java file it replaces. The build excludes exactly that inherited file; missing, ambiguous or undeclared replacements fail validation. This leaves the Fabric and Forge implementations intact.
 
 ### The mapping seam (kept on purpose)
 
@@ -97,21 +99,16 @@ Three classes need package-private access inside vanilla's own packages, so thei
 
 ## CI and releasing
 
-| Workflow | Trigger | What it does |
-|---|---|---|
-| `build.yml` | push to `main` / pull requests (ignoring `**.md` and `docs/**`) | reads the matrix → each target installs its JDK and runs `./gradlew build` (tests included) |
-| `release.yml` | a `v*` tag | **`vX.Y.Z`:** build all three loader targets for Windows x64 and Linux x64 → check the repository version matches the tag → create a Release with six JARs → publish to the stores; **`vX.Y.Z-rc1`:** a prerelease only, **nothing goes to the stores** |
+`build.yml` reads the current target matrix, builds and checks each target, and retains its Windows/Linux artifacts for 14 days. `release.yml` handles `v*` tags and manual runs; the default dry run builds, tests and packages the full matrix into an Actions artifact without creating a Release or publishing to stores. Formal releases reuse those artifacts to create and verify a complete draft before publishing it. Prereleases do not go to stores. The manual `target` input filters store publishing only; the Release always contains the full matrix. Retrying one store target processes both OS artifacts and both store steps again, without guaranteed duplicate suppression.
+
+See [CI and release details](../ci.md) for triggers, Telegram notification rules, artifact contents, and store retry steps.
 
 Release checklist:
 
 1. bump `mod_version` in the root `gradle.properties`;
 2. write a `## vX.Y.Z` section in `RELEASE_NOTES.md` (the release body comes from it; a tagged suffix falls back to the base version's section);
 3. commit and push `main`;
-4. tag `vX.Y.Z`, push the tag, and watch the three jobs in `release.yml`.
-
-To rehearse the flow without touching the stores, push a suffixed tag (`vX.Y.Z-rc1`); the store job is skipped entirely.
-
-> ⚠️ **A rehearsal only covers the first three stages.** A `-rc` tag makes the `if` skip the publish job before its `matrix` is even evaluated. 0.2.10 hit exactly that on its real release: the publish job read `needs.targets.outputs.list` while declaring only `needs: build`, so GitHub dropped the whole job — the run went red, the log stayed empty, and the jobs list was one short. Fixing the workflow file is not enough: **the tag has to move with it** (`git tag -f` and `git push --force origin vX.Y.Z`), because a tag push runs the workflow file as it exists in that tag's tree.
+4. tag `vX.Y.Z` and push it; review the draft's attachments before publishing. Published tags cannot be overwritten.
 
 ### Store publishing and project copy
 
