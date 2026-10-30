@@ -2,7 +2,7 @@
 
 ## Repository layout: one branch, many targets
 
-There is exactly one source branch, **`main`**, and a release builds one jar per target from it. Splitting by Minecraft version or loader was tried and dropped: with per-version branches, keeping the non-primary branches current depends on someone remembering to write a catch-up commit, nothing enforces the timing, and older versions lag behind for months.
+There is exactly one source branch, **`main`**. A release builds Windows and Linux jars for each target in the current release matrix, which currently contains only NeoForge 26.3. The Fabric 1.21.1 and Forge 1.20.1 source projects remain in the repository and can still be built manually. Splitting by Minecraft version or loader was tried and dropped: with per-version branches, keeping the non-primary branches current depends on someone remembering to write a catch-up commit, nothing enforces the timing, and older versions lag behind for months.
 
 ```
 gradle.properties              # repository-wide identity: mod_version / mod_id / mod_group_id / license / authors
@@ -89,9 +89,9 @@ Three classes need package-private access inside vanilla's own packages, so thei
 
 `tools/verify_targets.py` runs locally and in CI from the same file. It covers thirteen things, among them:
 
-- **the matrix is a rule:** every Minecraft version that appears needs all three of Fabric / NeoForge / Forge — either build it, or declare `buildable: false` and say why;
+- **the matrix is a rule:** every Minecraft version that appears needs entries for Fabric / NeoForge / Forge; an unsupported or unimplemented target stays explicit with `buildable: false` and a reason. `ci_build: false` keeps an existing target's source in the repository while excluding it from CI; `buildable: false` excludes it from releases and stores. A `buildable: true` target must also have `ci_build: true`;
 - **one identity:** no platform may define `mod_version` or its siblings locally;
-- **project directories and matrix entries must exist for each other:** a directory outside the matrix is source nothing ever compiles;
+- **project directories and matrix entries must exist for each other:** source projects have target entries, and `ci_build: false` does not remove an existing target or its source from the matrix;
 - **predicates match mounts:** mounting a layer you do not satisfy is red;
 - **twin copies:** every file in the mapping layer needs a counterpart in each non-official target being built (found by alias); missing, or byte-identical, is red;
 - **declaration matches implementation:** the `java` / `gradle` in `targets.json` must agree with the project's toolchain and wrapper;
@@ -99,7 +99,7 @@ Three classes need package-private access inside vanilla's own packages, so thei
 
 ## CI and releasing
 
-`build.yml` reads the current target matrix, builds and checks each target, and retains its Windows/Linux artifacts for 14 days. `release.yml` handles `v*` tags and manual runs; the default dry run builds, tests and packages the full matrix into an Actions artifact without creating a Release or publishing to stores. Formal releases reuse those artifacts to create and verify a complete draft before publishing it. Prereleases do not go to stores. The manual `target` input filters store publishing only; the Release always contains the full matrix. Retrying one store target processes both OS artifacts and both store steps again, without guaranteed duplicate suppression.
+`build.yml` reads targets with `ci_build: true`, builds and checks them, and retains their Windows/Linux artifacts for 14 days. `release.yml` reads targets with `buildable: true` for `v*` tags and manual runs. Both matrices currently contain only NeoForge 26.3. The default dry run builds, tests and packages that release matrix into an Actions artifact without creating a Release or publishing to stores. Formal releases reuse those artifacts to create and verify a complete draft before publishing it. Prereleases do not go to stores. The manual `target` input filters store publishing only; the Release always contains the full current release matrix. Retrying one store target processes both OS artifacts and both store steps again, without guaranteed duplicate suppression.
 
 See [CI and release details](../ci.md) for triggers, Telegram notification rules, artifact contents, and store retry steps.
 

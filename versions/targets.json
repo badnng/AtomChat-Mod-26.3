@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "【支持哪些目标，一处声明】CI 遍历这里所有 buildable 的条目逐个构建，把全部 jar 挂在同一个 Release 上。",
+    "【支持哪些目标，一处声明】CI 构建未停用 ci_build 且工程存在的目标；buildable: true 的产物进入 Release。",
     "",
     "【矩阵是规则，不是清单】每个 Minecraft 版本都要有 Fabric / NeoForge / Forge 三个条目。缺了哪个",
     "应该在这里看得见（buildable: false + note 写明卡在哪儿或为什么不做），而不是想不起来。这条由 CI 校验。",
@@ -17,8 +17,8 @@
     "层名是「这套 API 从哪个 Minecraft 版本开始有」或「哪套映射」，所以 1.21.1 与将来的更高版本都挂",
     "1.21+，而 1.20.1 在它之前，不挂任何版本层。",
     "",
-    "【buildable 管的是「发不发」，不是「编不编」】工程目录存在 = CI 就编它。代码进了仓库却没有任何地方编，",
-    "等于躺着一份没人验证的源码 —— 正是这套结构要消掉的静默。buildable: true 另外表示产物进 Release。",
+    "【CI 与发布分别声明】ci_build 默认为 true；显式 false 可保留工程源码但停止自动构建。",
+    "buildable: true 表示产物进 Release，且不允许停用 ci_build。本仓库仅自动构建和发布 26.3 NeoForge。",
     "",
     "【java / gradle 各目标可以不同】它们是硬约束（1.20.1 要 Java 17 与 Gradle 8.8，NeoForge 要 Gradle 9.2.1），",
     "所以不强行统一；各目标在自己的工程目录里各建各的。",
@@ -36,12 +36,13 @@
     "java": 21,
     "gradle": "8.8",
     "project": "platforms/1.21.1-fabric",
-    "buildable": true,
+    "buildable": false,
+    "ci_build": false,
     "layers": [
       "1.21+",
       "fabric"
     ],
-    "note": "唯一用 Yarn 映射的目标：不挂 layers/mapping/official/，自己保留 33 个 main + 12 个 test 的 Yarn 名副本（与官方名那份路径一一对应）。"
+    "note": "保留旧版 Fabric 源码作为参考，本 26.3 仓库不再自动构建或发布此目标。使用 Yarn 映射，不挂 official 层，保留同路径副本。"
   },
   "1.21.1-neoforge": {
     "minecraft": "1.21.1",
@@ -69,12 +70,13 @@
     "java": 17,
     "gradle": "8.8",
     "project": "platforms/1.20.1-forge",
-    "buildable": true,
+    "buildable": false,
+    "ci_build": false,
     "layers": [
       "official",
       "forge"
     ],
-    "note": "Java 17 与 Gradle 8.8 是硬约束（ForgeGradle 6 不吃 Gradle 9）。运行时是 SRG 名，refmap 由 ForgeGradle 生成。只挂 official 映射层，不挂 1.21+ 版本层。"
+    "note": "保留旧版 Forge 源码作为参考，本 26.3 仓库不再自动构建或发布此目标。手动构建仍需 Java 17 与 Gradle 8.8；运行时为 SRG 名，refmap 由 ForgeGradle 生成。"
   },
   "1.21.1-forge": {
     "minecraft": "1.21.1",
@@ -149,6 +151,7 @@
     "gradle": "9.2.1",
     "project": "platforms/26.3-neoforge",
     "buildable": true,
+    "ci_build": true,
     "layers": [
       "1.21+",
       "official",

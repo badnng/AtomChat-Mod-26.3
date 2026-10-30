@@ -1,6 +1,8 @@
 # CI 与发版
 
-CI 矩阵以 `versions/targets.json` 为准；当前构建 Fabric 1.21.1（JDK 21）、Forge 1.20.1（JDK 17）和 NeoForge 26.3（JDK 25）。各目标构建 Windows x64 与 Linux x64 的 bundled JAR，并随产物提供 SHA-256 与 buildinfo；Actions 产物保留 14 天。
+CI 与 Release/store 矩阵都从 `versions/targets.json` 动态生成：CI 只选 `ci_build: true` 的目标，Release/store 只选 `buildable: true` 的目标。当前两者都只有 `26.3-neoforge`（JDK 25），分别构建 Windows x64 与 Linux x64 的 bundled JAR，并随产物提供 SHA-256 与 buildinfo；Actions 产物保留 14 天。
+
+`1.21.1-fabric` 与 `1.20.1-forge` 的源码仍保留在仓库，也可在各自目录手动构建。`ci_build: false` 只表示不纳入 CI；`buildable: false` 表示不参与 Release 与商店发布。未声明 `ci_build` 时默认为 `true`，且 `buildable: true` 的目标必须同时启用 CI 构建。
 
 ## 构建与通知
 
@@ -14,6 +16,6 @@ Action 依赖固定到完整 commit SHA；Dependabot 每周按组更新 GitHub A
 
 ## Release
 
-`release.yml` 可由 `v*` 标签触发；手动运行必须填写已有且指向当前版本提交的 `v*` 标签。`dry_run` 默认是 `true`：仍会构建、测试完整动态矩阵、校验并打包附件、上传 Actions 产物，但不会创建或发布 GitHub Release，也不会发布商店。正式运行复用构建阶段上传的同一批 JAR，不重复构建；先创建草稿 Release 并检查附件齐全，再发布。已发布的 tag 不可覆盖。
+`release.yml` 可由 `v*` 标签触发；手动运行必须填写已有且指向当前版本提交的 `v*` 标签。`dry_run` 默认是 `true`：仍会构建、测试完整 Release 动态矩阵（当前只有 `26.3-neoforge`）、校验并打包附件、上传 Actions 产物，但不会创建或发布 GitHub Release，也不会发布商店。正式运行复用构建阶段上传的同一批 JAR，不重复构建；先创建草稿 Release 并检查附件齐全，再发布。已发布的 tag 不可覆盖。
 
-手动运行的 `target` 是字符串：`all` 表示全部当前动态矩阵目标，也可填写一个矩阵目标名。它只筛选商店发布目标；Release 始终覆盖全部当前可构建目标。正式版会发布到商店，预发布标签只建 Release，不发商店。需要重试商店发布时，使用已正式发布的 tag，并同时设置 `publish_stores_only=true`、`dry_run=false`。同一目标的重试会再次处理 Windows 与 Linux 两个附件，并分别运行两家商店的发布步骤；商店端不保证自动去重。
+手动运行的 `target` 是字符串：`all` 表示全部当前可发布目标，也可填写一个矩阵目标名。它只筛选商店发布目标；Release 始终覆盖完整的当前 Release 矩阵。正式版会发布到商店，预发布标签只建 Release，不发商店。需要重试商店发布时，使用已正式发布的 tag，并同时设置 `publish_stores_only=true`、`dry_run=false`。同一目标的重试会再次处理 Windows 与 Linux 两个附件，并分别运行两家商店的发布步骤；商店端不保证自动去重。

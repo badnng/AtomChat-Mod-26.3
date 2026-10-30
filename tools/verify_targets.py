@@ -5,7 +5,7 @@
   * 矩阵的规则（每个 Minecraft 版本都要有 Fabric / NeoForge / Forge 三条）
   * mappings 全目标一致（shared/ 里那些 net.minecraft.* 名字的前提）
   * buildable: true 的目标不许留 unverified
-  * 工程目录存在就必须在矩阵里，反之亦然（不许有"没有任何地方编"的源码）
+  * 所有工程目录必须声明；ci_build: false 可明确停用旧目标的 CI 构建
   * 各平台不许自己定义身份键（mod_version 等只在仓库根那一份）
   * 矩阵里写的 java / gradle 与工程里实际的 toolchain / wrapper 一致（防止两边各写一份然后漂移）
 
@@ -78,6 +78,30 @@ def check_root_identity() -> None:
         fail(f"仓库根的 gradle.properties 缺身份键：{', '.join(missing)}")
 
 
+def check_ci_build(name: str, target: dict) -> None:
+    enabled = target.get("ci_build", True)
+    if type(enabled) is not bool:
+        fail(f"目标 {name} 的 ci_build 必须是布尔值")
+    elif target.get("buildable") and not enabled:
+        fail(f"目标 {name} 声明 buildable: true，但 ci_build: false —— 发布目标必须参与 CI 构建")
+
+
+def make_ci_matrix(targets: dict) -> list[dict]:
+    matrix = [
+        {
+            "target": name,
+            "project": target["project"],
+            "java": target["java"],
+            "buildable": bool(target["buildable"]),
+            "suffix": "" if target["buildable"] else "-未验证",
+        }
+        for name, target in targets.items()
+        if (isinstance(target, dict) and target.get("ci_build", True) is True
+            and isinstance(target.get("project"), str) and (ROOT / target["project"]).is_dir())
+    ]
+    return sorted(matrix, key=lambda entry: entry["target"])
+
+
 def check_targets(targets: dict, layers: dict, aliases: dict) -> None:
     if not targets:
         fail("versions/targets.json 里一个目标都没有 —— 文件坏了或被改空了")
@@ -93,6 +117,7 @@ def check_targets(targets: dict, layers: dict, aliases: dict) -> None:
         if any(f not in t for f in REQUIRED_FIELDS):
             continue
 
+        check_ci_build(name, t)
         mc, loader = t["minecraft"], t["loader"]
         seen_combo.add((mc, loader))
         mappings.setdefault(t["mappings"], []).append(name)
@@ -627,8 +652,9 @@ def main() -> int:
             continue
         mark = "发" if t.get("buildable") else "不发"
         exists = "有工程" if (ROOT / t["project"]).is_dir() else "无工程"
+        ci = "构建" if t.get("ci_build", True) else "停用"
         print(f"  {name:18} mc={t.get('minecraft'):7} loader={t.get('loader'):9} "
-              f"java={t.get('java')} gradle={t.get('gradle')} {mark}/{exists} layers={t.get('layers')}")
+              f"java={t.get('java')} gradle={t.get('gradle')} {mark}/{exists} CI={ci} layers={t.get('layers')}")
 
     if errors:
         print("\n校验未通过：", file=sys.stderr)
@@ -644,18 +670,7 @@ def main() -> int:
         # 产物名后缀在这里算好，不交给工作流里的表达式：
         # GitHub 表达式的 `a && '' || b` 因为空串是 falsy 会静默取到 b，
         # 于是"没验证"的标记会贴到正式产物上（踩过一次）。
-        matrix = [
-            {
-                "target": name,
-                "project": t["project"],
-                "java": t["java"],
-                "buildable": bool(t["buildable"]),
-                "suffix": "" if t["buildable"] else "-未验证",
-            }
-            for name, t in targets.items()
-            if isinstance(t, dict) and (ROOT / t.get("project", "")).is_dir()
-        ]
-        matrix.sort(key=lambda e: e["target"])
+        matrix = make_ci_matrix(targets)
         with open(args.matrix_out, "w", encoding="utf-8") as f:
             json.dump(matrix, f)
         print(f"\nCI 矩阵（{len(matrix)} 个目标）已写入 {args.matrix_out}")

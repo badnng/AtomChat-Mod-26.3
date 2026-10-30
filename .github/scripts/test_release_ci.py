@@ -15,7 +15,9 @@ import release_ci as release
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        fixture_parent = Path(__file__).resolve().parents[2] / ".work"
+        fixture_parent.mkdir(exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(prefix="release-ci-", dir=fixture_parent)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "versions").mkdir()
@@ -187,6 +189,21 @@ class ReleaseTests(unittest.TestCase):
         self.collect()
         for target in ("future", "missing"):
             with self.subTest(target=target), self.assertRaises(ValueError):
+                release.verify_target(self.root, self.artifacts, target)
+
+    def test_retained_legacy_projects_do_not_require_release_artifacts(self):
+        for target in ("1.21.1-fabric", "1.20.1-forge"):
+            project = "platforms/" + target
+            (self.root / project).mkdir(parents=True)
+            self.matrix[target] = {"project": project, "java": 21, "buildable": False, "ci_build": False}
+        self.save_matrix()
+        self.collect()
+        result = self.prepare()
+        self.assertEqual(result["jarCount"], 2)
+        self.assertEqual([f"build-info-{self.target}.json"],
+                         [path.name for path in self.output.glob("build-info-*.json")])
+        for target in ("1.21.1-fabric", "1.20.1-forge"):
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, "buildable"):
                 release.verify_target(self.root, self.artifacts, target)
 
     def test_release_count_follows_matrix_and_rejects_mixed_runs(self):

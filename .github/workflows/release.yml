@@ -57,6 +57,7 @@ jobs:
           python3 -B .github/scripts/release_ci.py validate-tag --tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
           python3 -B -m unittest discover -s .github/scripts -p 'test_*.py'
           python3 -B tools/test_verify_jars.py
+          python3 -B tools/test_ci_targets.py
           python3 -B tools/verify_targets.py --matrix-out "$RUNNER_TEMP/matrix.json"
       - name: 导出可发布目标与提交号
         id: matrix
