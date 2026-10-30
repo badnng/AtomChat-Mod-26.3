@@ -29,7 +29,7 @@ A client-side mod that replaces the vanilla chat screen with a vector-drawn phon
 | Target | Requires |
 | --- | --- |
 | Fabric 1.21.1 | Fabric Loader 0.16+, Fabric API |
-| NeoForge 26.3 | NeoForge 26.3.0.99+ |
+| NeoForge 26.3 | NeoForge 26.3.0.92+ |
 | Forge 1.20.1 | Forge 47+ |
 
 Java 25 for NeoForge 26.3, Java 21 for Fabric 1.21.1, and Java 17 for Forge 1.20.1. **Windows x64 and Linux x64 have separate JARs.** Choose exactly one for your OS; Linux files contain `linux-x64` in the name. Each JAR bundles only its matching Skija native. Linux needs EGL/OpenGL libraries (Ubuntu/Debian: `sudo apt install libegl1 libgl1`). All three targets work client-side; install the same jar on the server for media hosting and profile synchronization.
