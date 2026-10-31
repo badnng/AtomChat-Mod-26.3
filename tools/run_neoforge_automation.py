@@ -20,6 +20,7 @@ def main() -> int:
     parser.add_argument("--java-home", type=Path, help="JDK 25 installation")
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--performance", action="store_true", help="Sample real frame intervals without a performance pass/fail threshold")
+    parser.add_argument("--blur-motion", action="store_true", help="Capture opening/closing blur motion, refresh and scale regression evidence")
     parser.add_argument("--graphics-api", choices=("opengl", "prefer-vulkan"), default="opengl",
                         help="Startup graphics preference for a fresh isolated client; performance reports verify the active backend")
     parser.add_argument("--width", type=int, default=1920)
@@ -31,8 +32,10 @@ def main() -> int:
     parser.add_argument("--allow-partial", action="store_true",
                         help="Accept explicitly skipped scenarios (still rejects failures)")
     args = parser.parse_args()
-    if args.performance and args.history_run:
+    if (args.performance or args.blur_motion) and args.history_run:
         parser.error("Performance sampling requires a fresh isolated run")
+    if args.performance and args.blur_motion:
+        parser.error("Choose either --performance or --blur-motion")
     if min(args.width, args.height, args.sample_seconds, args.warmup_seconds) <= 0:
         parser.error("Dimensions and sampling durations must be positive")
     root = Path(__file__).resolve().parents[1]
@@ -71,7 +74,7 @@ def main() -> int:
         # runs legacy options data fixes, which can replace new graphics options.
         options = ["version:5023", f'preferredGraphicsBackend:"{backend}"',
                    "fullscreen:false", "enableVsync:false"]
-        if args.performance:
+        if args.performance or args.blur_motion:
             options.extend([f"overrideWidth:{args.width}", f"overrideHeight:{args.height}"])
         (run_dir / "options.txt").write_text("\n".join(options) + "\n", encoding="utf-8")
         environment["ATOMCHAT_AUTOMATION_GRAPHICS_API"] = args.graphics_api
@@ -90,6 +93,10 @@ def main() -> int:
                         f"-Patomchat.automation.height={args.height}",
                         f"-Patomchat.automation.sampleSeconds={args.sample_seconds}",
                         f"-Patomchat.automation.warmupSeconds={args.warmup_seconds}"])
+    if args.blur_motion:
+        command.extend(["-Patomchat.automation.blurMotion=true",
+                        f"-Patomchat.automation.width={args.width}",
+                        f"-Patomchat.automation.height={args.height}"])
     print(f"Automation directory: {run_dir}")
     if history_world:
         print(f"History-only fixture: {history_world}; original report preserved")
@@ -136,6 +143,15 @@ def main() -> int:
         return 2
     if any(item.get("status") == "FAIL" for item in checks):
         return 2
+    if args.blur_motion:
+        frames = data.get("blurMotionFrames", [])
+        if not frames:
+            print("FAIL: no blur motion render-tail samples", file=sys.stderr)
+            return 2
+        expected = "vulkan" if args.graphics_api == "prefer-vulkan" else "opengl"
+        if any(expected not in frame.get("activeGraphicsBackend", "").lower() for frame in frames):
+            print("FAIL: actual graphics backend did not match blur-motion request", file=sys.stderr)
+            return 2
     if any(sample.get("backendMatchesRequest") is False for sample in data.get("performance", [])):
         print("FAIL: actual graphics backend did not match the request; fallback measurements are preserved in the report", file=sys.stderr)
         return 2

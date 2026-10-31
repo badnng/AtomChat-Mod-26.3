@@ -7,7 +7,7 @@
   "client": [
     "MinecraftClientMixin",
     "ChatHudMixin",
-    "GuiRendererWorldCaptureMixin",
+    "GameRendererWorldCaptureMixin",
     "GuiGraphicsExtractorBlitInvoker",
     "WindowEventRoutingMixin",
     "MessageHandlerMixin",

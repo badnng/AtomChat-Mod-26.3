@@ -130,7 +130,9 @@ class PanelShellWiringSourceTest {
         for (String screen : SCREENS) {
             String src = source(screen);
             for (Map.Entry<String, Integer> call : REQUIRED.entrySet()) {
-                assertEquals(call.getValue().intValue(), occurrences(src, call.getKey()),
+                int expected = screen.startsWith("platforms/26.3-neoforge/")
+                        && call.getKey().equals("PanelOpenMotion.blurCapture(") ? 0 : call.getValue();
+                assertEquals(expected, occurrences(src, call.getKey()),
                         screen + ": expected " + call.getValue() + " x " + call.getKey());
             }
         }
@@ -153,9 +155,23 @@ class PanelShellWiringSourceTest {
                             + " second copy is the drift this block removed");
             assertEquals(1, occurrences(src, "PanelOpenMotion.openSlidePx(progress, AtomChatConfig.get().pageNavStyle)"),
                     screen + ": same for the slide");
-            assertEquals(1, occurrences(src, "PanelOpenMotion.PanelRect capture = PanelOpenMotion.blurCapture("),
-                    screen + ": the capture rect must be the one derivation, not hand-rolled"
-                            + " arithmetic beside it");
+            if (screen.startsWith("platforms/26.3-neoforge/")) {
+                // The extracted GUI draws the blur inside drawPanel's actual
+                // transform/clip. There is no independent capture rectangle.
+                assertEquals(0, occurrences(src, "PanelOpenMotion.blurCapture("));
+                assertEquals(1, occurrences(src, "graphics.drawWorldBlur(canvas,"));
+                assertTrue(src.indexOf("graphics.drawWorldBlur(canvas,")
+                        > src.indexOf("private void drawPanel("),
+                        "the blur must share the panel background's fade layer");
+                String renderer = source("platforms/26.3-neoforge/src/main/java/com/atom/chat/render/PanelBlurRenderer.java");
+                assertTrue(renderer.contains("canvas.clipRRect("));
+                assertTrue(renderer.contains("canvas.resetMatrix()"),
+                        "the moving clip must sample a stationary world image");
+            } else {
+                assertEquals(1, occurrences(src, "PanelOpenMotion.PanelRect capture = PanelOpenMotion.blurCapture("),
+                        screen + ": the capture rect must be the one derivation, not hand-rolled"
+                                + " arithmetic beside it");
+            }
         }
     }
 

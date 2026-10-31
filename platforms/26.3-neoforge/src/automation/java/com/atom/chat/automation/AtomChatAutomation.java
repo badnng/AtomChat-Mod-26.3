@@ -68,6 +68,7 @@ public final class AtomChatAutomation {
     private static final long START = System.nanoTime();
     private static final boolean HISTORY_ONLY = System.getenv("ATOMCHAT_AUTOMATION_HISTORY_WORLD") != null;
     private static final boolean PERFORMANCE = Boolean.getBoolean("atomchat.automation.performance");
+    private static final boolean BLUR_MOTION = Boolean.getBoolean("atomchat.automation.blurMotion");
     private static final String TOKEN = System.getenv().getOrDefault("ATOMCHAT_AUTOMATION_HISTORY_TOKEN",
             "atomchat-automation-" + System.currentTimeMillis());
     private static final String WORLD = System.getenv().getOrDefault("ATOMCHAT_AUTOMATION_HISTORY_WORLD", TOKEN);
@@ -188,7 +189,7 @@ public final class AtomChatAutomation {
                 }
             }
         }, () -> true);
-        if (PERFORMANCE) {
+        if (PERFORMANCE || BLUR_MOTION) {
             add("performance-resolution", 30,
                     () -> {
                         var window = Minecraft.getInstance().getWindow();
@@ -209,6 +210,54 @@ public final class AtomChatAutomation {
                         new WorldOptions(263L, false, false), WorldPresets::createTestWorldDimensions,
                         new TitleScreen()), AtomChatAutomation::worldReady);
         add("enable-debug", 2, () -> AtomChatConfig.get().debug = true, () -> true);
+        if (BLUR_MOTION) {
+            add("blur-motion-world-warmup", 30, () -> Minecraft.getInstance().setScreenAndShow(null),
+                    () -> ageMs() >= 2000);
+            for (String cycle : List.of("first", "repeat", "half-scale", "resize")) {
+                add("blur-motion-open-" + cycle, 30, () -> {
+                    if (cycle.equals("first")) {
+                        originalCaptureScale = AtomChatConfig.get().uiScale;
+                        originalCaptureHeight = AtomChatConfig.get().panelHeight;
+                    }
+                    panel = new AtomChatScreen("");
+                    // The constructor reloads persisted config; set fixture scale afterward.
+                    if (cycle.equals("half-scale")) {
+                        AtomChatConfig.get().uiScale = 0.5F;
+                        AtomChatConfig.get().panelHeight = Math.min(originalCaptureHeight, 400.0F);
+                    } else {
+                        AtomChatConfig.get().uiScale = originalCaptureScale;
+                        AtomChatConfig.get().panelHeight = originalCaptureHeight;
+                    }
+                    Minecraft.getInstance().setScreenAndShow(panel);
+                    panel.openWorldChat();
+                    AutomationBlurMotion.begin("open-" + cycle, panel, report.getParent().resolve("frames"));
+                }, AutomationBlurMotion::held);
+                if (cycle.equals("resize")) {
+                    add("blur-motion-window-resize", 30, () -> {
+                        AutomationBlurMotion.resize();
+                        Minecraft.getInstance().getWindow().setWindowed(1777, 997);
+                    }, AutomationBlurMotion::resizeHeld);
+                }
+                add("blur-motion-close-" + cycle, 30, AutomationBlurMotion::close, AutomationBlurMotion::closed);
+                add("blur-motion-capture-complete-" + cycle, 30, () -> { }, AutomationBlurMotion::complete);
+                add("blur-motion-closed-hold-" + cycle, 30, () -> { }, () -> ageMs() >= 600);
+                if (cycle.equals("resize")) {
+                    add("blur-motion-restore-window", 30, () -> Minecraft.getInstance().getWindow().setWindowed(
+                            Integer.getInteger("atomchat.automation.width", 1920),
+                            Integer.getInteger("atomchat.automation.height", 1080)),
+                            () -> Minecraft.getInstance().getWindow().getWidth() == Integer.getInteger("atomchat.automation.width", 1920)
+                                    && Minecraft.getInstance().getWindow().getHeight() == Integer.getInteger("atomchat.automation.height", 1080));
+                }
+            }
+            add("blur-motion-animation-oracle", 30, () -> {
+                AtomChatConfig.get().uiScale = originalCaptureScale;
+                AtomChatConfig.get().panelHeight = originalCaptureHeight;
+                AutomationBlurMotion.verify();
+            }, () -> true);
+            add("blur-motion-disconnect", 30, () -> Minecraft.getInstance().disconnectWithSavingScreen(),
+                    () -> Minecraft.getInstance().player == null && Minecraft.getInstance().level == null);
+            return;
+        }
         if (PERFORMANCE) {
             add("performance-world-warmup", 30, () -> Minecraft.getInstance().setScreenAndShow(null),
                     () -> ageMs() >= AutomationPerformance.warmupMs());
@@ -902,7 +951,7 @@ public final class AtomChatAutomation {
     private static void tick(ClientTickEvent.Post event) {
         if (finished) return;
         if (index >= STEPS.size()) {
-            if (HISTORY_ONLY || PERFORMANCE) {
+            if (HISTORY_ONLY || PERFORMANCE || BLUR_MOTION) {
                 finishReport("PASS");
                 Minecraft.getInstance().stop();
                 return;
@@ -978,7 +1027,8 @@ public final class AtomChatAutomation {
             Map<String, Object> root = new LinkedHashMap<>();
             root.put("schema", 1);
             root.put("minecraft", "26.3");
-            root.put("mode", PERFORMANCE ? "performance" : HISTORY_ONLY ? "history-only" : "full");
+            root.put("mode", BLUR_MOTION ? "blur-motion" : PERFORMANCE ? "performance" : HISTORY_ONLY ? "history-only" : "full");
+            if (BLUR_MOTION) root.put("blurMotionFrames", AutomationBlurMotion.frames());
             if (PERFORMANCE) root.put("performance", AutomationPerformance.results());
             root.put("status", status);
             root.put("updatedAt", Instant.now().toString());

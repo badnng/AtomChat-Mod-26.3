@@ -1,5 +1,52 @@
 # Development client automation
 
+For opening/closing blur regression evidence, run:
+
+```powershell
+python tools/run_neoforge_automation.py --java-home <JDK25> --blur-motion
+python tools/run_neoforge_automation.py --java-home <JDK25> --blur-motion --graphics-api prefer-vulkan
+python tools/analyze_blur_motion.py <automation-directory>/report.json
+```
+
+The dedicated mode repeats real open/close animations at original and half UI
+scale, with 1600 ms settled-open holds (covering the 500 ms cache refresh) and 600 ms
+closed holds. It records every observed render-tail frame's panel progress,
+closing state, blur-drawn state, snapshot generation, pending flag, capture count,
+scale and backend in `blurMotionFrames`. Progress deciles and settled 500 ms
+buckets save paired panel-surface and actual-compositor PNGs; each updated world
+blur source is saved separately. Captures add readback overhead and are visual
+regression evidence, not performance measurements. Animation progress is never
+overridden. The Java oracle requires multiple opening/closing samples with blur
+drawn whenever a snapshot exists and successful stable cache refreshes. A failing
+old implementation still completes all three capture cycles before the oracle.
+The open-hold clock starts at the first render-tail observation of progress=1,
+and the hold must also observe at least two distinct completed capture counts.
+This prevents PNG readback/encoding time during opening from consuming the
+entire stable hold. `settledHoldMs` records the actual settled observation time.
+The half-scale fixture applies scale after screen construction (which reloads
+persisted config), limits panel height to 400, and asserts a nonzero raster
+origin. In this known bright generated world the first published blur snapshot
+of each opening is scanned for its maximum RGB component; a maximum below 10
+fails the visual oracle while preserving the black PNG. This fixture-only
+assertion does not discard valid dark scenes in production.
+
+A fourth `resize` cycle restores the original scale/height after constructing
+the screen, holds it open, then resizes the actual window to 1777×997. It waits
+for the requested framebuffer size and another 1600 ms before closing, and
+restores the launch dimensions after close. Per-frame viewport dimensions and
+separate `open-resize`, `resized-resize`, and `close-resize` artifact names retain
+the original three cycles. The resize oracle requires a changed snapshot
+generation, repeated cache refreshes at the new size, and continuous snapshot
+availability plus blur drawing while the fully open panel survives the resize.
+
+The Pillow analysis writes `blur-image-metrics.json`: surface center RGBA mean
+and variation, adjacent compositor RGB differences, and blur-source center vs
+border drift from the first world-only source. A cached old panel tends to raise
+center drift relative to the border. Inspect these trajectories and source PNGs
+for a solid-to-blurred color jump or old UI in a refreshed source. The live world
+and changing panel geometry make universal image thresholds unreliable; these
+image metrics are explicitly diagnostic and do not claim pixel correctness.
+
 For an observational rendering benchmark, run:
 
 ```powershell

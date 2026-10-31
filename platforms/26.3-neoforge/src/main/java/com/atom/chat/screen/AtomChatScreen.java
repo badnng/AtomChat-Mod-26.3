@@ -1287,6 +1287,8 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
     private float panelProgress = 0.0F;
     /** Wall-clock timestamp of the previous frame — the progress clock consumes real dt. */
     private long lastFrameNanos = System.nanoTime();
+    private long blurWarmupStartedNanos;
+    private static final long BLUR_WARMUP_NANOS = 250_000_000L;
     /** Composer height seen by the previous blur-gate frame, for change detection. */
     private float lastBlurInputExtraH;
     private boolean blurDrawnThisFrame;
@@ -1847,8 +1849,17 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         long nowNanos = System.nanoTime();
         float frameDtMs = PanelOpenMotion.frameDtMs(nowNanos, lastFrameNanos);
         lastFrameNanos = nowNanos;
-        panelProgress = PanelOpenMotion.stepProgress(panelProgress, closing, frameDtMs,
-                Animations.enabled());
+        boolean blurWanted = AtomChatConfig.get().blurEnabled && !WallpaperStore.isSet();
+        if (blurWarmupStartedNanos == 0L) {
+            blurWarmupStartedNanos = nowNanos;
+        }
+        boolean waitingForBlur = blurWanted && PanelBlurRenderer.isAvailable()
+                && !PanelBlurRenderer.hasSnapshot() && panelProgress == 0.0F && !closing
+                && nowNanos - blurWarmupStartedNanos < BLUR_WARMUP_NANOS;
+        if (!waitingForBlur) {
+            panelProgress = PanelOpenMotion.stepProgress(panelProgress, closing, frameDtMs,
+                    Animations.enabled());
+        }
         boolean panelSettled = PanelOpenMotion.settled(panelProgress, closing);
         // Closing is cut at 6% left: past that the panel is a subpixel sliver
         // and the exponential tail would only delay setScreen(null) (see
@@ -1868,47 +1879,16 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
                 chromeAnimating);
         lastBlurInputExtraH = composer.extraH();
 
-        // Paint the cached world blur before the panel's Skia content. Keep
-        // the solid background until a world readback is actually available.
+        // The blur is drawn with the panel background, inside the same open/
+        // close layer. Pending readback must not select an opaque background.
         blurDrawnThisFrame = false;
-        boolean blurWanted = AtomChatConfig.get().blurEnabled && !WallpaperStore.isSet();
-
         graphics.checkFrameBufferId();
-        Runnable preUi = null;
-        if (blurWanted && PanelBlurRenderer.isAvailable()) {
-            preUi = () -> {
-                try {
-                    float strokeWidth = UiTokens.PANEL_BEZEL_WIDTH;
-                    // The capture rect must be the rect drawPhone paints: the
-                    // inset panel rect carried through the same open transform
-                    // (zoom around the panel centre, then the slide offset).
-                    PanelOpenMotion.PanelRect capture = PanelOpenMotion.blurCapture(
-                            panelProgress, AtomChatConfig.get().pageNavStyle,
-                            panelX(), panelY(), panelWidth(), panelHeight(), strokeWidth,
-                            uiDensity(), this.client.getWindow().getGuiScale());
-                    blurDrawnThisFrame = PanelBlurRenderer.render(
-                            new org.joml.Matrix4f(),
-                            capture.x(), capture.y(), capture.w(), capture.h(), capture.radius(),
-                            panelProgress);
-                } catch (Throwable t) {
-                    // One line, one stack trace, then the breaker: isAvailable()
-                    // goes false, so the pre-pass is not even built on the next
-                    // frame. Before this, a deterministic failure logged a full
-                    // stack trace every frame for as long as the panel stayed
-                    // open, which is how a real one-line cause turns into an
-                    // unreadable log.
-                    AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("ui", "AtomChat panel blur pre-pass failed, using solid background"), t);
-                    PanelBlurRenderer.disable(t.getClass().getSimpleName());
-                    blurDrawnThisFrame = false;
-                }
-            };
-        }
 
         // No superclass extraction: it would draw the vanilla input box and
         // widget chrome; our UI is fully Skia-drawn, the suggestor renders explicitly.
         PanelRasterBounds rasterBounds = PanelRasterBounds.of(client.getWindow().getWidth(),
                 client.getWindow().getHeight(), uiDensity(), panelX(), panelY(), panelWidth(), panelHeight());
-        graphics.draw(context, preUi, uiDensity(), rasterBounds,
+        graphics.draw(context, null, uiDensity(), rasterBounds,
                 (canvas, worldSnapshot) -> drawPhone(canvas, worldSnapshot, mouseX, mouseY, delta));
         // The hidden EditBox stays positioned so the IME floating window anchors
         // correctly; its text/cursor are drawn by Skia above. The suggestion popup
@@ -2145,10 +2125,9 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         float x = panelX();
         float y = panelY();
         float progress = panelProgress;
-        // The one open transform, shared with the blur pre-pass's capture rect
-        // (PanelOpenMotion.openScale/openSlidePx): ZOOM grows around the panel
-        // centre, SLIDE pushes in from the left. Same mapping on both sides or
-        // the blurred region drifts off the panel mid-flight.
+        // ZOOM grows around the panel centre; SLIDE pushes in from the left.
+        // Background blur and tint share this layer's fade and moving clip,
+        // while the blur itself samples stationary screen coordinates.
         float scale = PanelOpenMotion.openScale(progress, AtomChatConfig.get().pageNavStyle);
         float slide = PanelOpenMotion.openSlidePx(progress, AtomChatConfig.get().pageNavStyle);
         // Settled state: expApproach snaps to its target, so progress never
@@ -2299,15 +2278,20 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
                 canvas.restore();
             }
         } else {
-            // The raw-GL blur pre-pass already painted the rounded blurred image
-            // on the main framebuffer, so this layer is only the tint over it.
-            // Both paths use the configured panel colour — the blur branch used
-            // to hardcode 0xFF16191F, which made the background impossible to
-            // recolour with blur enabled (0.2.5 report). A blur that was asked
-            // for but did not land this frame falls back to an OPAQUE panel; see
-            // PanelBackground for why the translucent tint is only safe when the
-            // blur is deliberately off.
-            int tint = PanelBackground.tintFor(AtomChatConfig.get().blurEnabled, blurDrawnThisFrame,
+            if (AtomChatConfig.get().blurEnabled && PanelBlurRenderer.isAvailable()) {
+                try {
+                    blurDrawnThisFrame = graphics.drawWorldBlur(canvas,
+                            innerX, innerY, innerW, innerH, innerRadius);
+                } catch (Throwable error) {
+                    PanelBlurRenderer.disable(error.getClass().getSimpleName());
+                    AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("ui",
+                            "AtomChat panel blur failed, using solid background"), error);
+                }
+            }
+            // A pending asynchronous capture is a normal frame, not a broken
+            // renderer. Only a persistent blur failure selects opaque fallback.
+            boolean blurFailed = AtomChatConfig.get().blurEnabled && !PanelBlurRenderer.isAvailable();
+            int tint = PanelBackground.tintFor(blurFailed, false,
                     AtomChatConfig.get().panelBgColor, AtomChatConfig.get().panelOpacity);
             try (Paint bg = new Paint().setColor(tint)) {
                 canvas.drawRRect(RRect.makeXYWH(innerX, innerY, innerW, innerH, innerRadius), bg);

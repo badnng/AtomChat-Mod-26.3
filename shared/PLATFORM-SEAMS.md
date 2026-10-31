@@ -13,7 +13,7 @@
 分组是编译期事实：甲组少一个类型，那个目标当场编不过。判据用简单名的词边界匹配
 （覆盖 import 全限定名与同包简单名两种写法），偏保守 —— 注释里的提及也算，宁可多列。
 
-当前：甲组 **153** 个，乙组 **97** 个。
+当前：甲组 **153** 个，乙组 **99** 个。
 
 ## 甲：共用代码引用了的（接缝）
 
@@ -167,6 +167,7 @@
 | 1.21.1-fabric | `net.minecraft.client.gui.screen.AtomChatScreenMessageLookupTest` |
 | 26.3-neoforge | `com.atom.chat.automation.AtomChatAutomation` |
 | 26.3-neoforge | `com.atom.chat.automation.AtomChatPairAutomation` |
+| 26.3-neoforge | `com.atom.chat.automation.AutomationBlurMotion` |
 | 26.3-neoforge | `com.atom.chat.automation.AutomationMod` |
 | 26.3-neoforge | `com.atom.chat.automation.AutomationPerformance` |
 | 26.3-neoforge | `com.atom.chat.automation.AutomationPresentationCapture` |
@@ -175,8 +176,8 @@
 | 26.3-neoforge | `com.atom.chat.AtomChatClient` |
 | 26.3-neoforge | `com.atom.chat.audio.FeedbackSoundController` |
 | 26.3-neoforge | `com.atom.chat.mixin.AtomChatMixinPlugin` |
+| 26.3-neoforge | `com.atom.chat.mixin.GameRendererWorldCaptureMixin` |
 | 26.3-neoforge | `com.atom.chat.mixin.GuiGraphicsExtractorBlitInvoker` |
-| 26.3-neoforge | `com.atom.chat.mixin.GuiRendererWorldCaptureMixin` |
 | 26.3-neoforge | `com.atom.chat.mixin.WindowEventRoutingMixin` |
 | 26.3-neoforge | `com.atom.chat.net.AvatarPayloads` |
 | 26.3-neoforge | `com.atom.chat.net.ConfigScreenServer` |
@@ -206,6 +207,7 @@
 | 26.3-neoforge | `com.atom.chat.image.ImageLoaderLifecycleTest` |
 | 26.3-neoforge | `com.atom.chat.net.AvatarCompanionServerTest` |
 | 26.3-neoforge | `com.atom.chat.net.ConfigScreenServerPermissionTest` |
+| 26.3-neoforge | `com.atom.chat.render.PanelBlurCompositeTest` |
 | 26.3-neoforge | `com.atom.chat.render.PanelRasterBoundsTest` |
 | 26.3-neoforge | `com.atom.chat.render.RichTextInteractionSpanTest` |
 | 26.3-neoforge | `com.atom.chat.render.WindowEventRoutingTest` |

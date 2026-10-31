@@ -1,0 +1,186 @@
+{
+  "date": "2026-10-31",
+  "scope": "NeoForge 26.3 blur background; shared source-wiring tests adapted for the new in-layer renderer",
+  "root_causes": [
+    "The live chat screen can precede a frame that actually rendered the level. Reading that transition framebuffer published an all-black first world snapshot in both OpenGL and Vulkan.",
+    "The blurred world and panel tint were faded in separate layers.",
+    "Framebuffer resize released the valid background while replacement readback was pending."
+  ],
+  "changes": [
+    "Capture at GameRenderer pre-GUI composition only when extracted gameRenderState.shouldRenderLevel is true; retain original Screenshot synchronization.",
+    "Draw stationary screen-space world blur inside the moving panel clip and the same fade layer as its tint.",
+    "Bound initial warmup to 250ms; pending captures retain configured tint transparency, persistent blur failure retains the existing opaque fallback.",
+    "Preserve the previous blur image during resize and invalidate only stale in-flight requests."
+  ],
+  "baseline": {
+    "report": "platforms/26.3-neoforge/build/automation-20261031-171918-60848/report.json",
+    "first_published_snapshot_rgb": "all zero in each of three known-bright fixture openings; the next snapshot showed the normal world",
+    "evidence": "New bright-fixture black-snapshot assertions reproduced the issue before the world-frame guard."
+  },
+  "runtime_verification": {
+    "opengl": {
+      "report": "platforms/26.3-neoforge/build/automation-20261031-174420-105560/report.json",
+      "status": "PASS",
+      "checks": {
+        "PASS": 27
+      },
+      "observed_frames": 246,
+      "actual_backends": [
+        "OpenGL"
+      ],
+      "first_snapshots": [
+        {
+          "phase": "open-first",
+          "firstPublishedSnapshotMaxRGB": 244,
+          "capturedFrames": 1,
+          "viewportWidth": 1920,
+          "viewportHeight": 1080
+        },
+        {
+          "phase": "open-repeat",
+          "firstPublishedSnapshotMaxRGB": 255,
+          "capturedFrames": 11,
+          "viewportWidth": 1920,
+          "viewportHeight": 1080
+        },
+        {
+          "phase": "open-half-scale",
+          "firstPublishedSnapshotMaxRGB": 255,
+          "capturedFrames": 22,
+          "viewportWidth": 1920,
+          "viewportHeight": 1080
+        },
+        {
+          "phase": "open-resize",
+          "firstPublishedSnapshotMaxRGB": 255,
+          "capturedFrames": 33,
+          "viewportWidth": 1920,
+          "viewportHeight": 1080
+        },
+        {
+          "phase": "resized-resize",
+          "firstPublishedSnapshotMaxRGB": 255,
+          "capturedFrames": 42,
+          "viewportWidth": 1777,
+          "viewportHeight": 997
+        }
+      ],
+      "resized_frames_with_snapshot_and_blur": 37,
+      "sizes": [
+        [
+          1777,
+          997
+        ],
+        [
+          1920,
+          1080
+        ]
+      ],
+      "java_exit": 0
+    },
+    "vulkan": {
+      "report": "platforms/26.3-neoforge/build/automation-20261031-174554-100828/report.json",
+      "status": "PASS",
+      "checks": {
+        "PASS": 27
+      },
+      "observed_frames": 266,
+      "actual_backends": [
+        "Vulkan"
+      ],
+      "first_snapshots": [
+        {
+          "phase": "open-first",
+          "firstPublishedSnapshotMaxRGB": 246,
+          "capturedFrames": 1,
+          "viewportWidth": 1920,
+          "viewportHeight": 1080
+        },
+        {
+          "phase": "open-repeat",
+          "firstPublishedSnapshotMaxRGB": 255,
+          "capturedFrames": 10,
+          "viewportWidth": 1920,
+          "viewportHeight": 1080
+        },
+        {
+          "phase": "open-half-scale",
+          "firstPublishedSnapshotMaxRGB": 255,
+          "capturedFrames": 19,
+          "viewportWidth": 1920,
+          "viewportHeight": 1080
+        },
+        {
+          "phase": "open-resize",
+          "firstPublishedSnapshotMaxRGB": 255,
+          "capturedFrames": 28,
+          "viewportWidth": 1920,
+          "viewportHeight": 1080
+        },
+        {
+          "phase": "resized-resize",
+          "firstPublishedSnapshotMaxRGB": 255,
+          "capturedFrames": 36,
+          "viewportWidth": 1777,
+          "viewportHeight": 997
+        }
+      ],
+      "resized_frames_with_snapshot_and_blur": 45,
+      "sizes": [
+        [
+          1777,
+          997
+        ],
+        [
+          1920,
+          1080
+        ]
+      ],
+      "java_exit": 0
+    }
+  },
+  "unit_tests": {
+    "26.3-neoforge": {
+      "tests": 1335,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2
+    },
+    "1.21.1-fabric": {
+      "tests": 1306,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2
+    },
+    "1.20.1-forge": {
+      "tests": 1294,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2
+    }
+  },
+  "golden_compare": {
+    "status": "PASS",
+    "log": "platforms/26.3-neoforge/build/blur-golden-compare.log"
+  },
+  "builds": {
+    "26.3-neoforge": "build/blur-build.log",
+    "1.21.1-fabric": "build/blur-compat-build.log",
+    "1.20.1-forge": "build/blur-compat-build.log"
+  },
+  "legacy_windows_test_environment": {
+    "note": "Class files existed, but initial worker class loading failed under the Chinese workspace path; one-shot native-charset daemon overrides resolved it without editing the legacy projects.",
+    "fabric_jvmargs": "-Xmx3G -Dfile.encoding=COMPAT",
+    "forge_jvmargs": "-Xmx3G -Dfile.encoding=GBK"
+  },
+  "artifact": {
+    "path": "platforms/26.3-neoforge/build/libs/atomchat-NeoForge-26.3-0.3.0.jar",
+    "bytes": 17789382,
+    "sha256": "2edc6f50ae75adaf8d894ae362672a86033b2d8bb737d494ac624a377b94fc90"
+  },
+  "limits": [
+    "Real-client validation used isolated hidden Windows x64 sessions and generated flat worlds.",
+    "PNG capture and encoding perturb frame times; this is visual/state regression evidence, not a new FPS benchmark.",
+    "Miuix was discussed only; no style migration or Compose runtime dependency was added."
+  ]
+}

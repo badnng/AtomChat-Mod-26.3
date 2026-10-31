@@ -50,7 +50,9 @@ public final class SkiaGraphics implements AutoCloseable {
         // window dimensions it already extracted for the upcoming render pass.
         if (surface != null && (viewportWidth != Math.max(1, window.getWidth())
                 || viewportHeight != Math.max(1, window.getHeight()))) {
-            close();
+            // Keep the previous world image during resize readback. The blur
+            // renderer invalidates requests independently of GUI GPU resources.
+            closeRaster();
         }
     }
 
@@ -228,6 +230,11 @@ public final class SkiaGraphics implements AutoCloseable {
             throw new IllegalStateException("Skia surface not initialized");
         }
         return surface;
+    }
+
+    public boolean drawWorldBlur(Canvas canvas, float x, float y, float width, float height, float radius) {
+        return PanelBlurRenderer.render(canvas, bounds, viewportWidth, viewportHeight,
+                x, y, width, height, radius);
     }
 
     /** On-demand diagnostic readback, isolated from RenderPearl's GL state. */

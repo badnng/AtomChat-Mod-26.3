@@ -16,8 +16,6 @@ import io.github.humbleui.types.RRect;
 import io.github.humbleui.types.Rect;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
-import org.joml.Matrix4f;
-import org.joml.Vector4f;
 
 /**
  * Backend-neutral panel blur. Readback runs after the world and before GUI
@@ -36,7 +34,7 @@ public final class PanelBlurRenderer {
     private PanelBlurRenderer() {
     }
 
-    /** Called by GuiRendererWorldCaptureMixin before vanilla GUI composition. */
+    /** Called for rendered world frames, before vanilla GUI composition. */
     public static void captureWorld() {
         Minecraft client = Minecraft.getInstance();
         if (!(client.gui.screen() instanceof com.atom.chat.screen.AtomChatScreen)
@@ -50,7 +48,12 @@ public final class PanelBlurRenderer {
         var target = client.gameRenderer.mainRenderTarget();
         boolean resized = worldWidth != target.width || worldHeight != target.height;
         if (resized) {
-            releaseWorldSnapshot();
+            // Retain the previous image until the new-sized readback arrives.
+            // Invalidating only the request also keeps old callbacks from
+            // clearing the pending state belonging to the new viewport.
+            generation++;
+            capturePending = false;
+            nextRefresh = true;
             worldWidth = target.width;
             worldHeight = target.height;
         }
@@ -100,8 +103,10 @@ public final class PanelBlurRenderer {
                         capturedFrames++;
                     }
                 } catch (Throwable error) {
-                    disable(error.getClass().getSimpleName());
-                    AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("render", "World blur readback failed"), error);
+                    if (requestGeneration == generation) {
+                        disable(error.getClass().getSimpleName());
+                        AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("render", "World blur readback failed"), error);
+                    }
                 } finally {
                     if (requestGeneration == generation) {
                         capturePending = false;
@@ -115,29 +120,32 @@ public final class PanelBlurRenderer {
         }
     }
 
-    public static boolean render(Matrix4f pose, float x, float y, float width, float height,
-                                 float radius, float alpha) {
-        Canvas canvas = SkiaGraphics.prepassCanvas();
-        if (disabled || blurredWorld == null || canvas == null || alpha <= 0.003F || width <= 0 || height <= 0) {
+    /** Draw within the panel's own fade layer, sampling the stationary world. */
+    public static boolean render(Canvas canvas, PanelRasterBounds origin, int viewportWidth, int viewportHeight,
+                                 float x, float y, float width, float height, float radius) {
+        if (disabled || blurredWorld == null || canvas == null || origin == null
+                || viewportWidth <= 0 || viewportHeight <= 0 || width <= 0 || height <= 0) {
             return false;
         }
-        float scale = Minecraft.getInstance().getWindow().getGuiScale();
-        Vector4f origin = pose.transform(new Vector4f(x, y, 0.0F, 1.0F));
-        float left = origin.x() * scale;
-        float top = origin.y() * scale;
-        float w = width * Math.abs(pose.m00()) * scale;
-        float h = height * Math.abs(pose.m11()) * scale;
         int baseline = canvas.getSaveCount();
         canvas.save();
-        try (Paint paint = new Paint().setAlphaf(Math.clamp(alpha, 0.0F, 1.0F))) {
-            canvas.clipRRect(RRect.makeXYWH(left, top, w, h,
-                    Math.min(radius * scale, Math.min(w, h) / 2.0F)), true);
+        try (Paint paint = new Paint()) {
+            // Establish the moving panel clip before returning to framebuffer
+            // coordinates. The caller's saveLayer supplies the only fade.
+            canvas.clipRRect(RRect.makeXYWH(x, y, width, height,
+                    Math.max(0.0F, Math.min(radius, Math.min(width, height) / 2.0F))), true);
+            canvas.resetMatrix();
+            canvas.translate(-origin.x(), -origin.y());
             canvas.drawImageRect(blurredWorld, Rect.makeWH(blurredWorld.getWidth(), blurredWorld.getHeight()),
-                    Rect.makeWH(worldWidth, worldHeight), SamplingMode.LINEAR, paint, false);
+                    Rect.makeWH(viewportWidth, viewportHeight), SamplingMode.LINEAR, paint, false);
             return true;
         } finally {
             canvas.restoreToCount(baseline);
         }
+    }
+
+    public static boolean hasSnapshot() {
+        return !disabled && blurredWorld != null;
     }
 
     public static boolean isAvailable() {
@@ -164,6 +172,8 @@ public final class PanelBlurRenderer {
         generation++;
         capturePending = false;
         nextRefresh = true;
+        worldWidth = 0;
+        worldHeight = 0;
         if (blurredWorld != null) {
             blurredWorld.close();
             blurredWorld = null;

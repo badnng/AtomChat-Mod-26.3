@@ -20,6 +20,7 @@ public final class AutomationPresentationCapture {
     }
 
     public static void afterRender() {
+        AutomationBlurMotion.afterRender();
         var request = pending;
         if (request == null) return;
         pending = null;
