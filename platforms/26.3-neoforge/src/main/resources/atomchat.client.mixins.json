@@ -8,6 +8,8 @@
     "MinecraftClientMixin",
     "ChatHudMixin",
     "GuiRendererWorldCaptureMixin",
+    "GuiGraphicsExtractorBlitInvoker",
+    "WindowEventRoutingMixin",
     "MessageHandlerMixin",
     "MouseHandlerAccessor",
     "SuggestionWindowAccessor"

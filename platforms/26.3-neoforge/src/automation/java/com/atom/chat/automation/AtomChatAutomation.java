@@ -67,6 +67,7 @@ public final class AtomChatAutomation {
     private static final List<Step> STEPS = new ArrayList<>();
     private static final long START = System.nanoTime();
     private static final boolean HISTORY_ONLY = System.getenv("ATOMCHAT_AUTOMATION_HISTORY_WORLD") != null;
+    private static final boolean PERFORMANCE = Boolean.getBoolean("atomchat.automation.performance");
     private static final String TOKEN = System.getenv().getOrDefault("ATOMCHAT_AUTOMATION_HISTORY_TOKEN",
             "atomchat-automation-" + System.currentTimeMillis());
     private static final String WORLD = System.getenv().getOrDefault("ATOMCHAT_AUTOMATION_HISTORY_WORLD", TOKEN);
@@ -96,6 +97,9 @@ public final class AtomChatAutomation {
     private static long settledAtFrame = -1;
     private static net.minecraft.client.gui.screens.Screen lastConfirmedPrompt;
     private static String lastLoadScreen = "";
+    private static CompletableFuture<Void> presentationCapture;
+    private static float originalCaptureScale;
+    private static float originalCaptureHeight;
 
     private AtomChatAutomation() { }
 
@@ -111,6 +115,7 @@ public final class AtomChatAutomation {
         buildSteps();
         NeoForge.EVENT_BUS.addListener(AtomChatAutomation::tick);
         NeoForge.EVENT_BUS.addListener(AtomChatAutomation::soundStarted);
+        if (PERFORMANCE) NeoForge.EVENT_BUS.addListener(AutomationPerformance::frame);
         // A stalled renderer/server must still produce evidence and release the process.
         Thread watchdog = new Thread(() -> {
             try { Thread.sleep(Long.getLong("atomchat.automation.timeoutSeconds", 600L) * 1000L); }
@@ -156,8 +161,9 @@ public final class AtomChatAutomation {
             }
             Minecraft.getInstance().options.pauseOnLostFocus = false;
             Minecraft.getInstance().options.inactivityFpsLimit().set(net.minecraft.client.InactivityFpsLimit.MINIMIZED);
-            Minecraft.getInstance().options.framerateLimit().set(60);
-            Minecraft.getInstance().getFramerateLimitTracker().setFramerateLimit(60);
+            Minecraft.getInstance().options.framerateLimit().set(PERFORMANCE ? 260 : 60);
+            Minecraft.getInstance().getFramerateLimitTracker().setFramerateLimit(PERFORMANCE ? 260 : 60);
+            if (PERFORMANCE) Minecraft.getInstance().options.enableVsync().set(false);
             Minecraft.getInstance().options.renderDistance().set(2);
             Minecraft.getInstance().options.simulationDistance().set(2);
             AtomChatConfig.get().debug = true;
@@ -182,6 +188,19 @@ public final class AtomChatAutomation {
                 }
             }
         }, () -> true);
+        if (PERFORMANCE) {
+            add("performance-resolution", 30,
+                    () -> {
+                        var window = Minecraft.getInstance().getWindow();
+                        if (window.getWidth() == Integer.getInteger("atomchat.automation.width", 1920)
+                                && window.getHeight() == Integer.getInteger("atomchat.automation.height", 1080)) return;
+                        window.setWindowed(
+                            Integer.getInteger("atomchat.automation.width", 1920),
+                            Integer.getInteger("atomchat.automation.height", 1080));
+                    },
+                    () -> Minecraft.getInstance().getWindow().getWidth() == Integer.getInteger("atomchat.automation.width", 1920)
+                            && Minecraft.getInstance().getWindow().getHeight() == Integer.getInteger("atomchat.automation.height", 1080));
+        }
         add("create-singleplayer-world", 120, () -> Minecraft.getInstance().createWorldOpenFlows()
                 .createFreshLevel(WORLD,
                         new LevelSettings(WORLD, GameType.CREATIVE,
@@ -190,6 +209,25 @@ public final class AtomChatAutomation {
                         new WorldOptions(263L, false, false), WorldPresets::createTestWorldDimensions,
                         new TitleScreen()), AtomChatAutomation::worldReady);
         add("enable-debug", 2, () -> AtomChatConfig.get().debug = true, () -> true);
+        if (PERFORMANCE) {
+            add("performance-world-warmup", 30, () -> Minecraft.getInstance().setScreenAndShow(null),
+                    () -> ageMs() >= AutomationPerformance.warmupMs());
+            add("performance-no-panel", AutomationPerformance.timeoutSeconds(),
+                    () -> AutomationPerformance.begin("no-panel"), AutomationPerformance::complete);
+            add("performance-open-chat", 30, () -> {
+                panel = new AtomChatScreen("");
+                Minecraft.getInstance().setScreenAndShow(panel);
+                panel.openWorldChat();
+            }, AtomChatAutomation::panelFrameReady);
+            add("performance-chat-warmup", 30, () -> { },
+                    () -> ageMs() >= AutomationPerformance.warmupMs());
+            add("performance-stable-chat", AutomationPerformance.timeoutSeconds(),
+                    () -> AutomationPerformance.begin("stable-chat", graphics()), AutomationPerformance::complete);
+            addPresentationSteps();
+            add("performance-disconnect", 30, () -> Minecraft.getInstance().disconnectWithSavingScreen(),
+                    () -> Minecraft.getInstance().player == null && Minecraft.getInstance().level == null);
+            return;
+        }
         add("open-production-panel", 10, () -> {
             panel = new AtomChatScreen("");
             Minecraft.getInstance().setScreenAndShow(panel);
@@ -332,6 +370,7 @@ public final class AtomChatAutomation {
             panel.openWorldChat();
         }, AtomChatAutomation::panelFrameReady);
         add("open-public-chat", 5, () -> panel.openWorldChat(), AtomChatAutomation::panelFrameReady);
+        addPresentationSteps();
         add("pointer-open-emoji-panel", 8, () -> clickRect(layout().emojiBtn),
                 () -> ((com.atom.chat.ui.EmojiPanel) panelField("emojiPanel")).isOpen() && panelFrameReady());
         add("pointer-close-emoji-panel", 8, () -> clickRect(layout().emojiBtn),
@@ -716,14 +755,72 @@ public final class AtomChatAutomation {
                 && graphics().isReady() && graphics().visiblePixelSamples() > 0;
     }
 
+    private static void addPresentationSteps() {
+        add("presentation-stable-chat", 30, () -> {
+            originalCaptureScale = AtomChatConfig.get().uiScale;
+            originalCaptureHeight = AtomChatConfig.get().panelHeight;
+            requestPresentation("stable-chat");
+        }, AtomChatAutomation::presentationReady);
+        add("presentation-half-scale-ready", 30, () -> {
+            panel = new AtomChatScreen("");
+            AtomChatConfig.get().uiScale = 0.5F;
+            AtomChatConfig.get().panelHeight = Math.min(originalCaptureHeight, 400.0F);
+            Minecraft.getInstance().setScreenAndShow(panel);
+            panel.openWorldChat();
+        }, () -> halfScaleReady() && panelFrameReady());
+        add("presentation-half-scale-chat", 30, () -> {
+            if (!halfScaleReady()) throw new AssertionError("Half-scale scene lost its scale or nonzero raster origin");
+            requestPresentation("half-scale-chat");
+        },
+                AtomChatAutomation::presentationReady);
+        add("presentation-restore-scale", 30, () -> {
+            panel = new AtomChatScreen("");
+            AtomChatConfig.get().uiScale = originalCaptureScale;
+            AtomChatConfig.get().panelHeight = originalCaptureHeight;
+            Minecraft.getInstance().setScreenAndShow(panel);
+            panel.openWorldChat();
+        }, AtomChatAutomation::panelFrameReady);
+    }
+
+    private static boolean halfScaleReady() throws Exception {
+        if (AtomChatConfig.get().uiScale != 0.5F) {
+            throw new AssertionError("Expected uiScale=0.5, got " + AtomChatConfig.get().uiScale);
+        }
+        var bounds = presentationBounds();
+        return bounds != null && bounds.y() > 0;
+    }
+
+    private static com.atom.chat.render.PanelRasterBounds presentationBounds() throws Exception {
+        var boundsField = SkiaGraphics.class.getDeclaredField("bounds");
+        boundsField.setAccessible(true);
+        return (com.atom.chat.render.PanelRasterBounds) boundsField.get(graphics());
+    }
+
+    private static void requestPresentation(String name) throws Exception {
+        capturePanel("presentation-" + name + "-surface");
+        var path = report.getParent().resolve("frames").resolve("presentation-" + name + "-composited.png");
+        presentationCapture = AutomationPresentationCapture.request(path);
+        result("presentation-artifacts-" + name, "PASS", "Surface: "
+                + path.resolveSibling("presentation-" + name + "-surface.png")
+                + "; real composited render target: " + path
+                + "; uiScale=" + AtomChatConfig.get().uiScale
+                + "; panelHeight=" + AtomChatConfig.get().panelHeight
+                + "; bounds=" + presentationBounds()
+                + "; activeGraphicsBackend=" + com.mojang.blaze3d.systems.RenderSystem.getDevice().getDeviceInfo().backendName()
+                + "; renderBackend=" + (graphics().isGpuAccelerated() ? "skia-opengl" : "skia-raster")
+                + "; visual inspection required for alignment, orientation and alpha blending");
+    }
+
+    private static boolean presentationReady() {
+        if (!presentationCapture.isDone()) return false;
+        presentationCapture.join();
+        return true;
+    }
+
     private static void capturePanel(String name) throws Exception {
         Path image = report.getParent().resolve("frames").resolve(name + ".png");
         Files.createDirectories(image.getParent());
-        try (var snapshot = graphics().requireSurface().makeImageSnapshot();
-             var data = snapshot.encodeToData(io.github.humbleui.skija.EncodedImageFormat.PNG)) {
-            if (data == null) throw new AssertionError("Panel snapshot encoding failed");
-            Files.write(image, data.getBytes());
-        }
+        Files.write(image, graphics().capturePng());
     }
 
     private static com.atom.chat.chat.ChatMessage sentMessage() {
@@ -797,13 +894,15 @@ public final class AtomChatAutomation {
         return "screen=" + (screen == null ? "null" : screen.getClass().getName() + ":" + translationKey(screen.getTitle()))
                 + ", player=" + (client.player != null) + ", level=" + (client.level != null)
                 + ", connection=" + (client.getConnection() != null)
-                + ", integratedServer=" + (client.getSingleplayerServer() != null);
+                + ", integratedServer=" + (client.getSingleplayerServer() != null)
+                + ", framebuffer=" + client.getWindow().getWidth() + "x" + client.getWindow().getHeight()
+                + ", window=" + client.getWindow().getScreenWidth() + "x" + client.getWindow().getScreenHeight();
     }
 
     private static void tick(ClientTickEvent.Post event) {
         if (finished) return;
         if (index >= STEPS.size()) {
-            if (HISTORY_ONLY) {
+            if (HISTORY_ONLY || PERFORMANCE) {
                 finishReport("PASS");
                 Minecraft.getInstance().stop();
                 return;
@@ -879,7 +978,8 @@ public final class AtomChatAutomation {
             Map<String, Object> root = new LinkedHashMap<>();
             root.put("schema", 1);
             root.put("minecraft", "26.3");
-            root.put("mode", HISTORY_ONLY ? "history-only" : "full");
+            root.put("mode", PERFORMANCE ? "performance" : HISTORY_ONLY ? "history-only" : "full");
+            if (PERFORMANCE) root.put("performance", AutomationPerformance.results());
             root.put("status", status);
             root.put("updatedAt", Instant.now().toString());
             root.put("world", WORLD);

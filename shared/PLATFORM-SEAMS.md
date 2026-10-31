@@ -13,7 +13,7 @@
 分组是编译期事实：甲组少一个类型，那个目标当场编不过。判据用简单名的词边界匹配
 （覆盖 import 全限定名与同包简单名两种写法），偏保守 —— 注释里的提及也算，宁可多列。
 
-当前：甲组 **153** 个，乙组 **85** 个。
+当前：甲组 **153** 个，乙组 **97** 个。
 
 ## 甲：共用代码引用了的（接缝）
 
@@ -168,11 +168,16 @@
 | 26.3-neoforge | `com.atom.chat.automation.AtomChatAutomation` |
 | 26.3-neoforge | `com.atom.chat.automation.AtomChatPairAutomation` |
 | 26.3-neoforge | `com.atom.chat.automation.AutomationMod` |
+| 26.3-neoforge | `com.atom.chat.automation.AutomationPerformance` |
+| 26.3-neoforge | `com.atom.chat.automation.AutomationPresentationCapture` |
 | 26.3-neoforge | `com.atom.chat.automation.mixin.HiddenWindowMixin` |
+| 26.3-neoforge | `com.atom.chat.automation.mixin.PresentationCaptureMixin` |
 | 26.3-neoforge | `com.atom.chat.AtomChatClient` |
 | 26.3-neoforge | `com.atom.chat.audio.FeedbackSoundController` |
 | 26.3-neoforge | `com.atom.chat.mixin.AtomChatMixinPlugin` |
+| 26.3-neoforge | `com.atom.chat.mixin.GuiGraphicsExtractorBlitInvoker` |
 | 26.3-neoforge | `com.atom.chat.mixin.GuiRendererWorldCaptureMixin` |
+| 26.3-neoforge | `com.atom.chat.mixin.WindowEventRoutingMixin` |
 | 26.3-neoforge | `com.atom.chat.net.AvatarPayloads` |
 | 26.3-neoforge | `com.atom.chat.net.ConfigScreenServer` |
 | 26.3-neoforge | `com.atom.chat.net.MediaPayloads` |
@@ -190,13 +195,20 @@
 | 26.3-neoforge | `com.atom.chat.net.TestCompanionServer` |
 | 26.3-neoforge | `com.atom.chat.net.TestPayloads` |
 | 26.3-neoforge | `com.atom.chat.notification.NotificationController` |
+| 26.3-neoforge | `com.atom.chat.render.GlStateSnapshot` |
+| 26.3-neoforge | `com.atom.chat.render.GpuSkiaSurface` |
+| 26.3-neoforge | `com.atom.chat.render.HiddenGlContext` |
+| 26.3-neoforge | `com.atom.chat.render.PanelRasterBounds` |
+| 26.3-neoforge | `com.atom.chat.render.WindowEventRouting` |
 | 26.3-neoforge | `com.atom.chat.screen.ComponentClickHandler` |
 | 26.3-neoforge | `com.atom.chat.screen.LegacyInput` |
 | 26.3-neoforge | `com.atom.chat.chat.ChatCommandCaptureTest` |
 | 26.3-neoforge | `com.atom.chat.image.ImageLoaderLifecycleTest` |
 | 26.3-neoforge | `com.atom.chat.net.AvatarCompanionServerTest` |
 | 26.3-neoforge | `com.atom.chat.net.ConfigScreenServerPermissionTest` |
+| 26.3-neoforge | `com.atom.chat.render.PanelRasterBoundsTest` |
 | 26.3-neoforge | `com.atom.chat.render.RichTextInteractionSpanTest` |
+| 26.3-neoforge | `com.atom.chat.render.WindowEventRoutingTest` |
 | 26.3-neoforge | `com.atom.chat.screen.AtomChatDraftLifecycleTest` |
 | 26.3-neoforge | `com.atom.chat.screen.AtomChatScreenMessageLookupTest` |
 | 26.3-neoforge | `com.atom.chat.screen.ComponentClickHandlerTest` |

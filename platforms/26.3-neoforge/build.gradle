@@ -88,7 +88,7 @@ neoForge {
             systemProperty 'atomchat.automation.report', automationReportFile.absolutePath
             systemProperty 'atomchat.automation.hideWindow', 'true'
             systemProperty 'atomchat.automation.timeoutSeconds', providers.gradleProperty('atomchat.automation.timeoutSeconds').getOrElse('420')
-            ['pairRole', 'controlDir'].each { option ->
+            ['pairRole', 'controlDir', 'performance', 'width', 'height', 'sampleSeconds', 'warmupSeconds'].each { option ->
                 def value = providers.gradleProperty("atomchat.automation.${option}").orNull
                 if (value != null) {
                     systemProperty "atomchat.automation.${option}", value

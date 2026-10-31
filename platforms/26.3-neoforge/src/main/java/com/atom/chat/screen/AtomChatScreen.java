@@ -55,6 +55,7 @@ import com.atom.chat.render.RichTextRenderer;
 import com.atom.chat.render.SkiaDraw;
 import com.atom.chat.render.SkiaFontRenderer;
 import com.atom.chat.render.SkiaGraphics;
+import com.atom.chat.render.PanelRasterBounds;
 import com.atom.chat.settings.AvatarClickWiring;
 import com.atom.chat.settings.ProfilePageWiring;
 import com.atom.chat.settings.SettingsActions;
@@ -1905,7 +1906,9 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
 
         // No superclass extraction: it would draw the vanilla input box and
         // widget chrome; our UI is fully Skia-drawn, the suggestor renders explicitly.
-        graphics.draw(context, preUi, uiDensity(),
+        PanelRasterBounds rasterBounds = PanelRasterBounds.of(client.getWindow().getWidth(),
+                client.getWindow().getHeight(), uiDensity(), panelX(), panelY(), panelWidth(), panelHeight());
+        graphics.draw(context, preUi, uiDensity(), rasterBounds,
                 (canvas, worldSnapshot) -> drawPhone(canvas, worldSnapshot, mouseX, mouseY, delta));
         // The hidden EditBox stays positioned so the IME floating window anchors
         // correctly; its text/cursor are drawn by Skia above. The suggestion popup

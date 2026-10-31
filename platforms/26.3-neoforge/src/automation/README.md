@@ -1,5 +1,40 @@
 # Development client automation
 
+For an observational rendering benchmark, run:
+
+```powershell
+python tools/run_neoforge_automation.py --java-home <JDK25> --performance
+python tools/run_neoforge_automation.py --java-home <JDK25> --performance --width 3840 --height 2160
+python tools/run_neoforge_automation.py --java-home <JDK25> --performance --graphics-api prefer-vulkan
+```
+
+This uses a fresh isolated hidden client and deterministic singleplayer world,
+then samples no-panel and settled world-chat phases. Default window size is
+1920×1080, with five seconds of warmup and fifteen seconds of sampling per phase;
+`--warmup-seconds` and `--sample-seconds` override these durations. Vsync is
+disabled and the FPS option is 260 (vanilla's maximum/unlimited setting, not an
+enforced 260 FPS cap). The report records actual window
+dimensions, consecutive `RenderFrameEvent.Pre` intervals (p50/p95/mean/max), and
+the production `FrameProfile` summary for each phase. These are measurements,
+with no performance pass/fail threshold; compare matching sizes and settings on
+the same machine. Frame intervals measure client frame extraction cadence,
+not GPU presentation or monitor refresh timestamps;
+the `panel` profile measures the AtomChat draw call separately.
+
+`--graphics-api` defaults to `opengl`. The launcher writes the requested backend
+into the fresh isolated `options.txt` before startup. `prefer-vulkan` lets
+Minecraft try Vulkan first and OpenGL second, but the performance report records
+the actual device backend and the launcher exits with failure if it fell back.
+Fallback measurements remain available for diagnosis.
+
+After sampling (and during the full suite), stable chat and half-scale chat are
+saved as paired `frames/presentation-*-surface.png` and
+`frames/presentation-*-composited.png` images. The latter reads the real render
+target at `GameRenderer.render` tail; it includes vanilla composition and is
+intended for visual checks of origin, vertical orientation, and alpha blending.
+The half-scale scene restores the original UI scale afterward. These captures
+are evidence for inspection, not automatic pixel-equivalence assertions.
+
 This source set is loaded only by `runAutomation`. It must never be included in
 the release JAR. The normal client entry point installs it reflectively only
 when `atomchat.automation=true`.

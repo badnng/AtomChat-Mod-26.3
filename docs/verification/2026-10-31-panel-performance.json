@@ -1,0 +1,345 @@
+{
+  "date": "2026-10-31",
+  "scope": "NeoForge 26.3 / Windows x64",
+  "changes": [
+    "Bound raster/texture work to stable panel animation bounds",
+    "Skia GPU rendering directly into an OpenGL GUI texture",
+    "Vulkan remains the game backend; private hidden OpenGL context draws Skia, transfers premultiplied panel RGBA for Vulkan composition",
+    "Preserve GL driver state and restore SDL context/capabilities",
+    "Route SDL window events by window ID so auxiliary resizes cannot resize the game",
+    "Move alpha diagnostics off normal frames"
+  ],
+  "measurement_conditions": {
+    "gpu": "AMD Radeon RX 6750 GRE 10GB",
+    "java": "Zulu 25.0.2",
+    "window": [
+      1920,
+      1080
+    ],
+    "scene": "isolated deterministic flat singleplayer world, settled empty public chat, blur enabled",
+    "warmup_seconds": 5,
+    "sample_seconds": 15,
+    "vsync": false,
+    "timing": "CPU/client frame extraction intervals, not monitor presentation timestamps",
+    "cpu_baseline": "after bounded raster optimization, before GPU rendering; conservative comparison to the original full-window CPU raster"
+  },
+  "measurements": {
+    "opengl_cpu_bounded": {
+      "report": "platforms/26.3-neoforge/build/automation-20261031-162258-94184/report.json",
+      "status": "PASS",
+      "phases": [
+        {
+          "phase": "no-panel",
+          "width": 1920,
+          "height": 1080,
+          "intervalCount": 36745,
+          "elapsedMs": 35041.7192,
+          "frameIntervalP50Ms": 0.7449,
+          "frameIntervalP95Ms": 2.1637,
+          "frameIntervalMaxMs": 104.8284,
+          "frameIntervalMeanMs": 0.9535432902435705,
+          "frameProfile": "AtomChat render profile (debug) - rolling window, times in ms, alloc in KB per call\n  panel  no samples\n  decode no samples\n  layout no samples",
+          "timingSource": "System.nanoTime at RenderFrameEvent.Pre; client frame extraction cadence, not GPU presentation timestamps",
+          "requestedFpsOption": 260,
+          "pacingNote": "260 is the vanilla maximum/unlimited setting; this probe does not impose a 260 FPS cap or measure display presentation",
+          "vsyncRequested": false,
+          "actualFpsLimit": 260,
+          "throttleReason": "NONE",
+          "vsyncOption": false,
+          "windowIconified": false,
+          "windowFocused": true
+        },
+        {
+          "phase": "stable-chat",
+          "width": 1920,
+          "height": 1080,
+          "intervalCount": 115,
+          "elapsedMs": 35186.8974,
+          "frameIntervalP50Ms": 296.1598,
+          "frameIntervalP95Ms": 387.9157,
+          "frameIntervalMaxMs": 397.0781,
+          "frameIntervalMeanMs": 303.0026617391304,
+          "frameProfile": "AtomChat render profile (debug) - rolling window, times in ms, alloc in KB per call\n  panel  n=116  p50=275.72  p95=344.96  max=350.12  mean=281.49  alloc=11.2 KB/call\n  decode no samples\n  layout n=1  p50=0.23  p95=0.23  max=0.23  mean=0.23",
+          "timingSource": "System.nanoTime at RenderFrameEvent.Pre; client frame extraction cadence, not GPU presentation timestamps",
+          "requestedFpsOption": 260,
+          "pacingNote": "260 is the vanilla maximum/unlimited setting; this probe does not impose a 260 FPS cap or measure display presentation",
+          "vsyncRequested": false,
+          "actualFpsLimit": 260,
+          "throttleReason": "NONE",
+          "vsyncOption": false,
+          "windowIconified": false,
+          "windowFocused": true
+        }
+      ]
+    },
+    "vulkan_cpu_bounded": {
+      "report": "platforms/26.3-neoforge/build/automation-20261031-163339-73396/report.json",
+      "status": "PASS",
+      "phases": [
+        {
+          "phase": "no-panel",
+          "width": 1920,
+          "height": 1080,
+          "requestedGraphicsApi": "prefer-vulkan",
+          "startupGraphicsPreference": "vulkan",
+          "activeGraphicsBackend": "Vulkan",
+          "graphicsDevice": "AMD Radeon RX 6750 GRE 10GB",
+          "graphicsDriver": "1.4.315 AMD proprietary driver 26.10.1 (AMD proprietary shader compiler)",
+          "backendMatchesRequest": true,
+          "graphicsBackendFallback": false,
+          "renderBackend": "no-panel",
+          "intervalCount": 13978,
+          "elapsedMs": 15040.3131,
+          "frameIntervalP50Ms": 0.7773,
+          "frameIntervalP95Ms": 2.6412,
+          "frameIntervalMaxMs": 20.2528,
+          "frameIntervalMeanMs": 1.0757290527972527,
+          "frameProfile": "AtomChat render profile (debug) - rolling window, times in ms, alloc in KB per call\n  panel  no samples\n  decode no samples\n  layout no samples",
+          "timingSource": "System.nanoTime at RenderFrameEvent.Pre; client frame extraction cadence, not GPU presentation timestamps",
+          "requestedFpsOption": 260,
+          "pacingNote": "260 is the vanilla maximum/unlimited setting; this probe does not impose a 260 FPS cap or measure display presentation",
+          "vsyncRequested": false,
+          "actualFpsLimit": 260,
+          "throttleReason": "NONE",
+          "vsyncOption": false,
+          "windowIconified": false,
+          "windowFocused": true
+        },
+        {
+          "phase": "stable-chat",
+          "width": 1920,
+          "height": 1080,
+          "requestedGraphicsApi": "prefer-vulkan",
+          "startupGraphicsPreference": "vulkan",
+          "activeGraphicsBackend": "Vulkan",
+          "graphicsDevice": "AMD Radeon RX 6750 GRE 10GB",
+          "graphicsDriver": "1.4.315 AMD proprietary driver 26.10.1 (AMD proprietary shader compiler)",
+          "backendMatchesRequest": true,
+          "graphicsBackendFallback": false,
+          "renderBackend": "skia-raster",
+          "surfaceWidth": 694,
+          "surfaceHeight": 1080,
+          "intervalCount": 53,
+          "elapsedMs": 15140.0826,
+          "frameIntervalP50Ms": 278.2129,
+          "frameIntervalP95Ms": 334.5733,
+          "frameIntervalMaxMs": 366.6635,
+          "frameIntervalMeanMs": 280.9932547169811,
+          "frameProfile": "AtomChat render profile (debug) - rolling window, times in ms, alloc in KB per call\n  panel  n=54  p50=262.59  p95=297.19  max=321.36  mean=264.44  alloc=11.7 KB/call\n  decode no samples\n  layout no samples",
+          "timingSource": "System.nanoTime at RenderFrameEvent.Pre; client frame extraction cadence, not GPU presentation timestamps",
+          "requestedFpsOption": 260,
+          "pacingNote": "260 is the vanilla maximum/unlimited setting; this probe does not impose a 260 FPS cap or measure display presentation",
+          "vsyncRequested": false,
+          "actualFpsLimit": 260,
+          "throttleReason": "NONE",
+          "vsyncOption": false,
+          "windowIconified": false,
+          "windowFocused": true
+        }
+      ]
+    },
+    "opengl_gpu": {
+      "report": "platforms/26.3-neoforge/build/automation-20261031-162708-92080/report.json",
+      "status": "PASS",
+      "phases": [
+        {
+          "phase": "no-panel",
+          "width": 1920,
+          "height": 1080,
+          "renderBackend": "no-panel",
+          "intervalCount": 8825,
+          "elapsedMs": 15014.6226,
+          "frameIntervalP50Ms": 1.1487,
+          "frameIntervalP95Ms": 4.4382,
+          "frameIntervalMaxMs": 42.0322,
+          "frameIntervalMeanMs": 1.7009743909348443,
+          "frameProfile": "AtomChat render profile (debug) - rolling window, times in ms, alloc in KB per call\n  panel  no samples\n  decode no samples\n  layout no samples",
+          "timingSource": "System.nanoTime at RenderFrameEvent.Pre; client frame extraction cadence, not GPU presentation timestamps",
+          "requestedFpsOption": 260,
+          "pacingNote": "260 is the vanilla maximum/unlimited setting; this probe does not impose a 260 FPS cap or measure display presentation",
+          "vsyncRequested": false,
+          "actualFpsLimit": 260,
+          "throttleReason": "NONE",
+          "vsyncOption": false,
+          "windowIconified": false,
+          "windowFocused": false
+        },
+        {
+          "phase": "stable-chat",
+          "width": 1920,
+          "height": 1080,
+          "renderBackend": "skia-opengl",
+          "surfaceWidth": 694,
+          "surfaceHeight": 1080,
+          "intervalCount": 13567,
+          "elapsedMs": 15043.1761,
+          "frameIntervalP50Ms": 0.8446,
+          "frameIntervalP95Ms": 1.973,
+          "frameIntervalMaxMs": 53.9199,
+          "frameIntervalMeanMs": 1.108641910518169,
+          "frameProfile": "AtomChat render profile (debug) - rolling window, times in ms, alloc in KB per call\n  panel  n=4096  p50=0.36  p95=0.52  max=1.39  mean=0.37  alloc=10.5 KB/call\n  decode no samples\n  layout no samples",
+          "timingSource": "System.nanoTime at RenderFrameEvent.Pre; client frame extraction cadence, not GPU presentation timestamps",
+          "requestedFpsOption": 260,
+          "pacingNote": "260 is the vanilla maximum/unlimited setting; this probe does not impose a 260 FPS cap or measure display presentation",
+          "vsyncRequested": false,
+          "actualFpsLimit": 260,
+          "throttleReason": "NONE",
+          "vsyncOption": false,
+          "windowIconified": false,
+          "windowFocused": false
+        }
+      ]
+    },
+    "vulkan_gpu_transfer": {
+      "report": "platforms/26.3-neoforge/build/automation-20261031-164052-92864/report.json",
+      "status": "PASS",
+      "phases": [
+        {
+          "phase": "no-panel",
+          "width": 1920,
+          "height": 1080,
+          "requestedGraphicsApi": "prefer-vulkan",
+          "startupGraphicsPreference": "vulkan",
+          "activeGraphicsBackend": "Vulkan",
+          "graphicsDevice": "AMD Radeon RX 6750 GRE 10GB",
+          "graphicsDriver": "1.4.315 AMD proprietary driver 26.10.1 (AMD proprietary shader compiler)",
+          "backendMatchesRequest": true,
+          "graphicsBackendFallback": false,
+          "renderBackend": "no-panel",
+          "intervalCount": 22918,
+          "elapsedMs": 15043.0581,
+          "frameIntervalP50Ms": 0.558,
+          "frameIntervalP95Ms": 1.2983,
+          "frameIntervalMaxMs": 11.1456,
+          "frameIntervalMeanMs": 0.6562726023213196,
+          "frameProfile": "AtomChat render profile (debug) - rolling window, times in ms, alloc in KB per call\n  panel  no samples\n  decode no samples\n  layout no samples",
+          "timingSource": "System.nanoTime at RenderFrameEvent.Pre; client frame extraction cadence, not GPU presentation timestamps",
+          "requestedFpsOption": 260,
+          "pacingNote": "260 is the vanilla maximum/unlimited setting; this probe does not impose a 260 FPS cap or measure display presentation",
+          "vsyncRequested": false,
+          "actualFpsLimit": 260,
+          "throttleReason": "NONE",
+          "vsyncOption": false,
+          "windowIconified": false,
+          "windowFocused": true
+        },
+        {
+          "phase": "stable-chat",
+          "width": 1920,
+          "height": 1080,
+          "requestedGraphicsApi": "prefer-vulkan",
+          "startupGraphicsPreference": "vulkan",
+          "activeGraphicsBackend": "Vulkan",
+          "graphicsDevice": "AMD Radeon RX 6750 GRE 10GB",
+          "graphicsDriver": "1.4.315 AMD proprietary driver 26.10.1 (AMD proprietary shader compiler)",
+          "backendMatchesRequest": true,
+          "graphicsBackendFallback": false,
+          "renderBackend": "skia-opengl-to-vulkan",
+          "surfaceWidth": 694,
+          "surfaceHeight": 1080,
+          "intervalCount": 5914,
+          "elapsedMs": 15042.8141,
+          "frameIntervalP50Ms": 2.219,
+          "frameIntervalP95Ms": 3.2653,
+          "frameIntervalMaxMs": 43.5271,
+          "frameIntervalMeanMs": 2.5430067128846803,
+          "frameProfile": "AtomChat render profile (debug) - rolling window, times in ms, alloc in KB per call\n  panel  n=4096  p50=1.71  p95=2.56  max=6.65  mean=1.82  alloc=10.2 KB/call\n  decode no samples\n  layout no samples",
+          "timingSource": "System.nanoTime at RenderFrameEvent.Pre; client frame extraction cadence, not GPU presentation timestamps",
+          "requestedFpsOption": 260,
+          "pacingNote": "260 is the vanilla maximum/unlimited setting; this probe does not impose a 260 FPS cap or measure display presentation",
+          "vsyncRequested": false,
+          "actualFpsLimit": 260,
+          "throttleReason": "NONE",
+          "vsyncOption": false,
+          "windowIconified": false,
+          "windowFocused": true
+        }
+      ]
+    }
+  },
+  "verification": {
+    "unit_tests": {
+      "tests": 1333,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2
+    },
+    "build_log": "platforms/26.3-neoforge/build/performance-build.log",
+    "golden_compare": "passed against local pre-edit baseline",
+    "target_matrix": "passed",
+    "platform_seams": "153 / 97, synchronized",
+    "production_log_outlets": "293, zero violations",
+    "jar_validation": "passed, Windows Skija native unique, automation absent",
+    "vulkan_opaque_presentation_pixels": {
+      "stable_chat": 624404,
+      "half_scale_chat_nonzero_y": 158890,
+      "fraction_exactly_matching_surface_rgb": 1.0
+    },
+    "vulkan_full_client": {
+      "report": "platforms/26.3-neoforge/build/automation-20261031-164523-80180/report.json",
+      "status": "PARTIAL",
+      "checks": {
+        "PASS": 161,
+        "SKIP": 11
+      },
+      "process_exit": 0,
+      "skipped_checks": [
+        "setting-switch-prepare-privacy-server_packs",
+        "setting-switch-pointer-and-persist-privacy-server_packs",
+        "setting-switch-pointer-restore-privacy-server_packs",
+        "multiplayer-broadcast-and-real-private-chat",
+        "OS-file-picker-clipboard-IME-and-audible-sound",
+        "all-page-visual-oracles",
+        "real-poke-sound-and-animation",
+        "remote-avatar-banner-and-resource-pack-sync",
+        "settings-sliders-colour-dialogs-and-destructive-actions",
+        "external-host-and-vanilla-client-degradation",
+        "emote-panel-item-editing"
+      ]
+    },
+    "opengl_full_client": {
+      "report": "platforms/26.3-neoforge/build/automation-20261031-163351-74928/report.json",
+      "status": "PARTIAL",
+      "checks": {
+        "PASS": 161,
+        "SKIP": 11
+      },
+      "process_exit": 0
+    },
+    "vulkan_full_presentation": {
+      "stable-chat": {
+        "bounds": [
+          0,
+          0,
+          694,
+          480
+        ],
+        "opaque_pixels": 265604,
+        "fraction_exactly_matching_surface_rgb": 0.9838820198490986,
+        "max_channel_error": 255,
+        "note": "The composited capture is a later frame and includes vanilla overlays and ongoing hover/cursor animation, so this scene is not an exact whole-panel oracle. The 1080p stable scene and nonzero-origin half-scale scenes match all opaque pixels exactly."
+      },
+      "half-scale-chat": {
+        "bounds": [
+          0,
+          83,
+          347,
+          314
+        ],
+        "opaque_pixels": 73612,
+        "fraction_exactly_matching_surface_rgb": 1.0,
+        "max_channel_error": 0
+      }
+    }
+  },
+  "artifact": {
+    "path": "platforms/26.3-neoforge/build/libs/atomchat-NeoForge-26.3-0.3.0.jar",
+    "bytes": 17789459,
+    "sha256": "37145c5f1784ad6254745d45ac6ccda9ea50ac02834c353e984c9c5c86d1a067"
+  },
+  "limits": [
+    "Windows x64 real OpenGL and real Vulkan tested; Linux not run in this change",
+    "Hidden benchmark window and reduced view distance are not a modpack FPS claim",
+    "Vulkan Skia acceleration needs an auxiliary OpenGL 3.3 driver; raster remains the fallback if it cannot initialize"
+  ]
+}
