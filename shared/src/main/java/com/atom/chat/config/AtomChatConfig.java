@@ -54,6 +54,22 @@ public class AtomChatConfig {
 
     /** Nav transition styles, read by {@link #pageNavStyle}. */
     public enum PageNavStyle { SLIDE, ZOOM }
+    /** Local interface presentation; independent of all color presets. */
+    public enum UiStyle { ATOMCHAT, MIUIX }
+    public UiStyle uiStyle = UiStyle.ATOMCHAT;
+
+    public UiStyle effectiveUiStyle() {
+        return uiStyle == null ? UiStyle.ATOMCHAT : uiStyle;
+    }
+
+    /** Navigation presentation used only by the miuix interface. */
+    public enum MiuixNavigationStyle { ICON_ONLY, ICON_AND_TEXT, SELECTED_LABEL, FLOATING }
+    public MiuixNavigationStyle miuixNavigationStyle = MiuixNavigationStyle.ICON_AND_TEXT;
+
+    public MiuixNavigationStyle effectiveMiuixNavigationStyle() {
+        return miuixNavigationStyle == null ? MiuixNavigationStyle.ICON_AND_TEXT : miuixNavigationStyle;
+    }
+
     /** Double-clicking another player's avatar performs the QQ-style poke shake. */
     public boolean avatarPokeEnabled = true;
     /** Local display preference; custom-avatar data is never changed by this choice. */
@@ -449,17 +465,59 @@ public class AtomChatConfig {
         return json;
     }
 
+    /** An invalid presentation choice must not discard unrelated saved options. */
+    private static String sanitizeUiStyle(String json) {
+        com.google.gson.JsonObject obj = GSON.fromJson(json, com.google.gson.JsonObject.class);
+        if (obj != null && obj.has("uiStyle")) {
+            try {
+                com.google.gson.JsonElement value = obj.get("uiStyle");
+                if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+                    obj.remove("uiStyle");
+                } else {
+                    obj.addProperty("uiStyle", UiStyle.valueOf(
+                            value.getAsString().trim().toUpperCase(java.util.Locale.ROOT)).name());
+                }
+            } catch (RuntimeException ignored) {
+                obj.remove("uiStyle");
+            }
+            return obj.toString();
+        }
+        return json;
+    }
+
+    /** Keep malformed navigation preferences isolated from other saved settings. */
+    private static String sanitizeMiuixNavigationStyle(String json) {
+        com.google.gson.JsonObject obj = GSON.fromJson(json, com.google.gson.JsonObject.class);
+        if (obj != null && obj.has("miuixNavigationStyle")) {
+            try {
+                com.google.gson.JsonElement value = obj.get("miuixNavigationStyle");
+                if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+                    obj.remove("miuixNavigationStyle");
+                } else {
+                    obj.addProperty("miuixNavigationStyle", MiuixNavigationStyle.valueOf(
+                            value.getAsString().trim().toUpperCase(java.util.Locale.ROOT)).name());
+                }
+            } catch (RuntimeException ignored) {
+                obj.remove("miuixNavigationStyle");
+            }
+            return obj.toString();
+        }
+        return json;
+    }
+
     private static AtomChatConfig load() {
         Path path = com.atom.chat.platform.Platform.configDir().resolve("atomchat/atomchat-client.json");
         if (Files.exists(path)) {
             try {
                 String json = Files.readString(path, StandardCharsets.UTF_8);
-                AtomChatConfig config = GSON.fromJson(sanitizePageNavStyle(sanitizeAvatarStyle(json)), AtomChatConfig.class);
+                AtomChatConfig config = GSON.fromJson(sanitizePageNavStyle(sanitizeAvatarStyle(sanitizeUiStyle(sanitizeMiuixNavigationStyle(json)))), AtomChatConfig.class);
                 if (config != null) {
                     if (config.blockedPlayers == null) {
                         config.blockedPlayers = new java.util.ArrayList<>();
                     }
                     config.avatarStyle = config.effectiveAvatarStyle();
+                    config.uiStyle = config.effectiveUiStyle();
+                    config.miuixNavigationStyle = config.effectiveMiuixNavigationStyle();
                     config.migrateCornerStyle();
                     config.migratePixelRadius();
                     config.clampContentScale();

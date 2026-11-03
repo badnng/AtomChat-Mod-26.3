@@ -236,6 +236,68 @@ class SettingsActionsTest {
     }
 
     @Test
+    void theUiStyleCardCyclesAndPersistsWithoutChangingColors() throws Exception {
+        AtomChatConfig cfg = AtomChatConfig.get();
+        AtomChatConfig.UiStyle original = cfg.uiStyle;
+        int accent = cfg.accentColor;
+        String theme = cfg.themeName;
+        StubHost host = new StubHost(tmp.resolve("avatar"));
+        SettingsActions actions = new SettingsActions(host);
+        try {
+            cfg.uiStyle = null;
+            actions.handleSettingsAction("ui_style");
+            assertEquals(AtomChatConfig.UiStyle.MIUIX, cfg.effectiveUiStyle());
+            java.nio.file.Path path = Platform.configDir().resolve("atomchat/atomchat-client.json");
+            assertEquals("MIUIX", com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(path))
+                    .getAsJsonObject().get("uiStyle").getAsString());
+            actions.handleSettingsAction("ui_style");
+            assertEquals(AtomChatConfig.UiStyle.ATOMCHAT, cfg.effectiveUiStyle());
+            assertEquals("ATOMCHAT", com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(path))
+                    .getAsJsonObject().get("uiStyle").getAsString());
+            assertEquals(accent, cfg.accentColor);
+            assertEquals(theme, cfg.themeName);
+            assertEquals(List.of(), host.calls);
+        } finally {
+            cfg.uiStyle = original;
+            AtomChatConfig.save(cfg);
+        }
+    }
+
+    @Test
+    void theMiuixNavigationStyleCardCyclesAllChoicesAndPersistsIndependently() throws Exception {
+        AtomChatConfig cfg = AtomChatConfig.get();
+        AtomChatConfig.MiuixNavigationStyle original = cfg.miuixNavigationStyle;
+        AtomChatConfig.UiStyle originalUi = cfg.uiStyle;
+        int accent = cfg.accentColor;
+        String theme = cfg.themeName;
+        StubHost host = new StubHost(tmp.resolve("avatar"));
+        SettingsActions actions = new SettingsActions(host);
+        try {
+            cfg.uiStyle = AtomChatConfig.UiStyle.ATOMCHAT;
+            cfg.miuixNavigationStyle = null;
+            for (AtomChatConfig.MiuixNavigationStyle expected : new AtomChatConfig.MiuixNavigationStyle[]{
+                    AtomChatConfig.MiuixNavigationStyle.SELECTED_LABEL,
+                    AtomChatConfig.MiuixNavigationStyle.FLOATING,
+                    AtomChatConfig.MiuixNavigationStyle.ICON_ONLY,
+                    AtomChatConfig.MiuixNavigationStyle.ICON_AND_TEXT}) {
+                actions.handleSettingsAction("miuix_navigation_style");
+                assertEquals(expected, cfg.effectiveMiuixNavigationStyle());
+                java.nio.file.Path path = Platform.configDir().resolve("atomchat/atomchat-client.json");
+                assertEquals(expected.name(), com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(path))
+                        .getAsJsonObject().get("miuixNavigationStyle").getAsString());
+                assertEquals(AtomChatConfig.UiStyle.ATOMCHAT, cfg.effectiveUiStyle());
+            }
+            assertEquals(accent, cfg.accentColor);
+            assertEquals(theme, cfg.themeName);
+            assertEquals(List.of(), host.calls);
+        } finally {
+            cfg.miuixNavigationStyle = original;
+            cfg.uiStyle = originalUi;
+            AtomChatConfig.save(cfg);
+        }
+    }
+
+    @Test
     void anUnknownCardAnswersNothing() throws Exception {
         StubHost host = new StubHost(tmp.resolve("avatar"));
         new SettingsActions(host).handleSettingsAction("no_such_card");

@@ -263,6 +263,12 @@ public final class NotificationBanner {
         return !banners.isEmpty();
     }
 
+    /** Immutable view for alternate renderers; expiry still belongs to this queue. */
+    public List<Active> snapshot() {
+        tick();
+        return List.copyOf(banners);
+    }
+
     /** [0..1] alpha: easeOutQuad drop-in, linear slide-out. */
     private float alphaFor(Active b, long now) {
         float age = now - b.born();

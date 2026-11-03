@@ -3,8 +3,9 @@ package com.atom.chat.font;
 import com.atom.chat.AtomChat;
 import io.github.humbleui.skija.Data;
 import io.github.humbleui.skija.Font;
-import io.github.humbleui.skija.FontVariation;
 import io.github.humbleui.skija.FontStyle;
+import io.github.humbleui.skija.FontVariation;
+import io.github.humbleui.skija.FontVariationAxis;
 import io.github.humbleui.skija.Typeface;
 
 import java.io.InputStream;
@@ -17,8 +18,8 @@ import java.util.Locale;
 public final class FontManager {
     /** Drop a licensed font file here (e.g. Noto Sans SC) to bundle it. */
     private static final String BUNDLED_FONT = "/assets/atomchat/font/bundled.otf";
-    /** True-bold face (same character set as the bundled regular) for headings. */
-    private static final String BUNDLED_BOLD_FONT = "/assets/atomchat/font/bundled-bold.otf";
+    private static final float MEDIUM_WEIGHT = 500.0F;
+    private static final float BOLD_WEIGHT = 700.0F;
     /** Faux-bold for thin system fallback fonts; a real bundled font makes this redundant. */
     private static boolean usingFallbackTypeface;
     private static Typeface defaultTypeface;
@@ -73,13 +74,23 @@ public final class FontManager {
     /** Variable fonts are cloned at Medium (wght 500) so text is not too thin. */
     private static Typeface mediumWeight(Typeface face) {
         try {
-            if (face.getVariations().length > 0) {
-                return face.makeClone(new FontVariation("wght", 500));
-            }
+            Typeface medium = cloneAtWeight(face, MEDIUM_WEIGHT);
+            return medium != null ? medium : face;
         } catch (Throwable t) {
             AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("resource", "Variable font weight clone failed, using default instance"), t);
         }
         return face;
+    }
+
+    /** Return a real variable-weight face, or {@code null} when this typeface has no wght axis. */
+    private static Typeface cloneAtWeight(Typeface face, float requestedWeight) {
+        for (FontVariationAxis axis : face.getVariationAxes()) {
+            if ("wght".equals(axis.getTag())) {
+                float weight = Math.max(axis.getMinValue(), Math.min(axis.getMaxValue(), requestedWeight));
+                return face.makeClone(new FontVariation("wght", weight));
+            }
+        }
+        return null;
     }
 
     public static Font font(float size) {
@@ -96,12 +107,7 @@ public final class FontManager {
         return font;
     }
 
-    /**
-     * A separate cached bold face for headings and labels that need more weight
-     * than the regular medium body. Prefers the bundled true-bold file —
-     * {@code setEmboldened(true)} is a stroke smear that looks mushy at small
-     * sizes — and only falls back to faux-bold when that file is absent.
-     */
+    /** A cached true-bold variable face, with faux-bold reserved for fixed system fallbacks. */
     public static Font boldFont(float size) {
         String key = size + "px-bold";
         Font cached = BOLD_CACHE.get(key);
@@ -120,19 +126,19 @@ public final class FontManager {
         return font;
     }
 
-    /** Bundled true-bold typeface, or {@code null} when the file is missing. */
+    /** Clone the default family at bold weight, or return {@code null} for a fixed system face. */
     private static Typeface getBoldTypeface() {
         if (boldLookupDone) {
             return boldTypeface;
         }
         boldLookupDone = true;
-        try (InputStream in = FontManager.class.getResourceAsStream(BUNDLED_BOLD_FONT)) {
-            if (in != null) {
-                boldTypeface = Typeface.makeFromData(Data.makeFromBytes(in.readAllBytes()));
-                AtomChat.LOGGER.info(com.atom.chat.diagnostics.AtomChatLog.message("resource", "Loaded bundled bold font {}"), BUNDLED_BOLD_FONT);
+        try {
+            boldTypeface = cloneAtWeight(getDefaultTypeface(), BOLD_WEIGHT);
+            if (boldTypeface != null) {
+                AtomChat.LOGGER.info(com.atom.chat.diagnostics.AtomChatLog.message("resource", "Using variable font weight {} for bold text"), BOLD_WEIGHT);
             }
-        } catch (Exception e) {
-            AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("resource", "Failed to load bundled bold font, falling back to faux bold"), e);
+        } catch (Throwable t) {
+            AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("resource", "Variable bold clone failed, falling back to faux bold"), t);
         }
         return boldTypeface;
     }

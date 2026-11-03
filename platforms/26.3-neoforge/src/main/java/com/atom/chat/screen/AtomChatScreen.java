@@ -1,5 +1,7 @@
 package com.atom.chat.screen;
 import com.atom.chat.AtomChat;
+import com.atom.chat.miuix.api.MiuixHost;
+import com.atom.chat.miuix.api.NativeNavigationInput;
 
 import com.atom.chat.chat.BlockList;
 import com.atom.chat.chat.PublicEchoTracker;
@@ -47,7 +49,6 @@ import com.atom.chat.page.PageHost;
 import com.atom.chat.page.ProfilePage;
 import com.atom.chat.font.FontManager;
 import com.atom.chat.mixin.MouseHandlerAccessor;
-import com.atom.chat.render.BlurMotionGate;
 import com.atom.chat.render.ClickableSpan;
 import com.atom.chat.render.DrawPrimitives;
 import com.atom.chat.render.PanelBlurRenderer;
@@ -106,6 +107,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.PreeditEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.ChatScreen;
@@ -126,6 +128,794 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class AtomChatScreen extends ChatScreen implements PageHost, NotificationJumpService.NavPort {
+    private final NativeMiuixHost miuixHost = new NativeMiuixHost();
+    private NativeMiuixBridge miuixBridge;
+    private long nativeFrameNanos;
+    private boolean nativeEffectsActive;
+    private final NativeMiuixCropper miuixCropper = new NativeMiuixCropper();
+    private final java.util.Map<UUID, Long> miuixPokes = new java.util.LinkedHashMap<>();
+    private final NativeMiuixSuggestions miuixSuggestions = new NativeMiuixSuggestions();
+    private String miuixFeedback = "";
+    private boolean miuixFeedbackSuccess;
+    private long miuixFeedbackUntil;
+    private int miuixInputModifiers;
+    private final NativeNavigationInput miuixNavigationInput = new NativeNavigationInput();
+    private MiuixHost.Jump miuixJump;
+    private long miuixJumpSequence;
+
+    private boolean nativeMiuix() {
+        return AtomChatConfig.get().effectiveUiStyle() == AtomChatConfig.UiStyle.MIUIX;
+    }
+
+    /** Retain live world sampling while an outgoing native page can still be visible. */
+    public boolean nativeWorldBackdropRequired() {
+        NavPage current = topNav();
+        return current.page() != AppPage.SETTINGS_SECTION || current.section() != SettingsSection.ABOUT
+                || !java.util.Objects.equals(current, miuixHost.nativeRoute)
+                || miuixHost.navigationSettledSequence < miuixHost.navigationSequence;
+    }
+
+    /** Both renderers share the gate's settled-coordinate input rule. */
+    private boolean panelInputAnimating() {
+        return PanelOpenMotion.animating(panelProgress, closing);
+    }
+
+    /** Typed adapter: all state is read from the same live services as AtomChat. */
+    private final class NativeMiuixHost implements MiuixHost {
+        private final java.util.Map<String, PlayerRef> players = new java.util.HashMap<>();
+        private final java.util.Map<String, Style> interactions = new java.util.HashMap<>();
+        // Domain arbitration accepts an int row identity. Preserve that identity
+        // across snapshots and history-window changes instead of using list indices.
+        private final java.util.Map<String, Integer> avatarClickIds = new java.util.HashMap<>();
+        private List<ChatMessage> messageSources = List.of();
+        private ChatMessage messagePredecessor;
+        private List<PlayerRef> messagePlayers = List.of();
+        private List<UUID> messageReactionKeys = List.of();
+        private List<Message> messageRows = List.of();
+        private java.util.Map<String, Style> messageInteractions = java.util.Map.of();
+        private MessageInputs messageInputs;
+        private final java.util.Map<String, java.lang.ref.WeakReference<Image>> encodedSources = new java.util.LinkedHashMap<>();
+        private final java.util.Map<String, byte[]> encodedImages = new java.util.LinkedHashMap<>();
+        private final java.util.Map<String, byte[]> aboutAssets = new java.util.HashMap<>();
+        private long encodedBytes;
+        private final java.util.Map<String, Long> stickerStamps = new java.util.HashMap<>();
+        private final com.atom.chat.emote.EmoteImageCache stickerImages = new com.atom.chat.emote.EmoteImageCache();
+        private final EmoteStore stickers = new EmoteStore(
+                com.atom.chat.platform.Platform.configDir().resolve("atomchat/emotes"),
+                () -> AtomChatConfig.get().emoteMax);
+        private final java.util.Map<String, Path> stickerFiles = new java.util.HashMap<>();
+        private boolean textFocus;
+        private boolean composerFocus;
+        private long stickersScannedAt;
+        private List<Sticker> stickerRows = List.of();
+        private NavPage nativeRoute;
+        private int nativeRouteDepth;
+        private long navigationSequence;
+        private long navigationSettledSequence;
+        private Navigation nativeNavigation = new Navigation(0L, "NONE");
+
+        /** Commit the domain stack now; Compose owns the displayed exit layer and its clock. */
+        private void settleNavigation() {
+            if (director.pageNavActive()) director.finishPageNav();
+            director.clearRootTransition();
+            NavPage current = topNav();
+            if (java.util.Objects.equals(current, nativeRoute)) return;
+            int depth = navStack.snapshot().size();
+            String motion = "NONE";
+            if (nativeRoute != null && AtomChatConfig.get().animationEnabled) {
+                if (nativeRoute.isRoot() && current.isRoot()) {
+                    motion = director.rootIndex(current.page()) > director.rootIndex(nativeRoute.page())
+                            ? "ROOT_FORWARD" : "ROOT_BACKWARD";
+                } else {
+                    motion = depth < nativeRouteDepth ? "POP" : "PUSH";
+                }
+            }
+            nativeRoute = current;
+            nativeRouteDepth = depth;
+            nativeNavigation = new Navigation(++navigationSequence, motion);
+        }
+
+        @Override public Navigation navigation() { return nativeNavigation; }
+        @Override public boolean worldBackdropRequired(State state) { return nativeWorldBackdropRequired(); }
+        @Override public String pageNavigationStyle() { return AtomChatConfig.get().pageNavStyle.name(); }
+
+        @Override public void navigationTransitionFinished(long sequence) {
+            if (sequence == navigationSequence) {
+                navigationSettledSequence = sequence;
+                miuixNavigationInput.transitionFinished(sequence);
+            }
+        }
+
+        private boolean navigationBusy() {
+            // Commands commit the domain route before the next scene snapshot. Include
+            // that unpublished interval, as well as the pending legacy pop it carries.
+            return director.pageNavActive() || !java.util.Objects.equals(topNav(), nativeRoute)
+                    || navigationSettledSequence < navigationSequence;
+        }
+
+        private void requestBack() {
+            if (closing || topNav().isRoot() || miuixNavigationInput.backInFlight()) return;
+            if (navigationBusy()) {
+                miuixNavigationInput.defer(NativeNavigationInput.Request.BACK);
+                return;
+            }
+            miuixNavigationInput.backStarted(navigationSequence);
+            popPage();
+        }
+
+        private void drainNavigationInput() {
+            if (closing || panelInputAnimating() || navigationBusy()
+                    || miuixBridge != null && miuixBridge.isComposingText()) return;
+            NativeNavigationInput.Request request = miuixNavigationInput.takeReady(true);
+            if (request == NativeNavigationInput.Request.CLOSE) requestClose();
+            else if (request == NativeNavigationInput.Request.BACK) {
+                // The original key may already have been released. Send a balanced
+                // pair, preserving a newly opened Compose popup's Escape priority.
+                boolean consumed = miuixBridge != null && miuixBridge.key(256, true, miuixInputModifiers);
+                if (miuixBridge != null) miuixBridge.key(256, false, miuixInputModifiers);
+                if (!consumed) requestBack();
+            }
+        }
+
+        @Override
+        public State snapshot() {
+            long now = System.currentTimeMillis();
+            players.clear();
+            interactions.clear();
+            // The original renderer settles this once per rendered frame. Native
+            // rendering must run the same competition window before reading route.
+            avatarWiring.settlePendingAvatarClick(now, closing);
+            settleNavigation();
+            drainNavigationInput();
+            settleNavigation();
+            composer.blurOnReadOnlyPage(isPrivateReadOnly());
+            syncProfileSignatureDraft();
+            String failure = com.atom.chat.reaction.ReactionClient.takeError();
+            if (failure != null) feedback("atomchat.reaction." + failure, false);
+            if (miuixCropper.takeError() != null) feedback("atomchat.upload.failed", false);
+            NavPage nav = topNav();
+            boolean chatPage = nav.page() == AppPage.WORLD_CHAT || nav.page() == AppPage.PRIVATE_CHAT;
+            boolean settingsPage = nav.page() == AppPage.SETTINGS || nav.page() == AppPage.SETTINGS_SECTION;
+            java.util.ArrayList<Conversation> conversations = new java.util.ArrayList<>();
+            if (nav.page() == AppPage.CHAT_LIST) for (ConversationListPage.Row row : conversationListPage.rows()) {
+                if (row.kind() == ConversationListPage.RowKind.DIVIDER) continue;
+                Player player = row.player() == null ? null : player(row.player());
+                ChatMessage latest = row.latest();
+                String preview = latest == null ? "" : latest.getDisplayText();
+                if (latest != null && Cicodes.extractImageUrl(latest.getRawText()) != null)
+                    preview = tr("atomchat.hud.image");
+                conversations.add(new Conversation(row.player() == null ? row.kind().name() : row.player().key(),
+                        row.kind() == ConversationListPage.RowKind.PUBLIC ? "world" : "player", player, row.title(), preview,
+                        latest == null ? 0L : latest.getTimestamp(), row.unread(), row.online(), row.blocked()));
+            }
+            List<ChatMessage> retained = chatPage ? messageWiring.messagesForNav(nav) : List.of();
+            HistoryWindow history = chatPage ? historyWindowForNav(nav, retained.size()) : null;
+            int start = history == null ? 0 : history.visibleStart();
+            List<Message> messages = chatPage ? messages(retained, start) : List.of();
+            ChatMessage reply = replySlots.replyTarget();
+            boolean readonly = isPrivateReadOnlyFor(nav);
+            Composer composerState = new Composer(composer.text(), input == null ? 0 : input.getCursorPosition(),
+                    input == null ? 0 : input.highlightPos, composerFocus, isWorldChatPage() && !readonly,
+                    reply == null ? null : reply.getId(), reply == null ? "" : messageSenderName(reply),
+                    reply == null ? "" : SendPipeline.quoteTextFor(reply), partnerTypingFor(nav),
+                    profilePage.isSignatureEditing() ? "signature" : quickPhrasePanel.isEditing() ? "phrase" : "chat");
+            java.util.ArrayList<Phrase> phrases = new java.util.ArrayList<>();
+            List<String> localPhrases = AtomChatConfig.get().quickPhrases;
+            if (chatPage && localPhrases != null) for (int i = 0; i < localPhrases.size(); i++)
+                phrases.add(new Phrase(i, localPhrases.get(i), false));
+            List<String> serverPhrases = chatPage ? com.atom.chat.pack.ServerPackStore.current().phrases() : List.of();
+            for (int i = 0; i < serverPhrases.size(); i++) phrases.add(new Phrase(i, serverPhrases.get(i), true));
+            com.atom.chat.pack.ServerPackStore pack = com.atom.chat.pack.ServerPackStore.current();
+            Path serverDir = pack.hasContent() ? pack.emotesDir() : null;
+            if (chatPage && (!java.util.Objects.equals(stickers.serverDir(), serverDir) || now - stickersScannedAt >= 1000)) {
+                stickers.setServerDir(serverDir);
+                stickersScannedAt = now;
+                java.util.ArrayList<Sticker> rows = new java.util.ArrayList<>();
+                stickerFiles.clear();
+                for (File file : stickers.list()) addSticker(rows, file, false);
+                for (File file : stickers.serverList()) addSticker(rows, file, true);
+                stickerRows = List.copyOf(rows);
+            }
+            java.util.ArrayList<Notice> notices = new java.util.ArrayList<>();
+            for (com.atom.chat.notification.NotificationBanner.Active banner : com.atom.chat.notification.NotificationBanner.INSTANCE.snapshot()) {
+                if (!com.atom.chat.notification.NotificationBanner.enabled(banner.type())) continue;
+                ChatMessage target = banner.message();
+                String id = noticeId(banner);
+                notices.add(new Notice(id, banner.type().name(), banner.sender().getString(), banner.content().getString(),
+                        target == null || target.isSystem() ? null : player(PlayerRef.of(target.getSenderUuid(), target.getProfileName())),
+                        runs(banner.sender(), id + ":sender"), runs(banner.content(), id + ":content"), banner.born()));
+            }
+            AtomChatConfig cfg = AtomChatConfig.get();
+            String section = nav.section() == null ? "" : nav.section().id();
+            String title = switch (nav.page()) {
+                case CHAT_LIST -> tr("atomchat.tab.chat");
+                case SETTINGS -> tr("atomchat.tab.settings");
+                case SETTINGS_SECTION -> tr("atomchat.settings." + section);
+                case WORLD_CHAT -> tr("atomchat.conversation.world");
+                case PRIVATE_CHAT -> nav.target().displayName();
+                case PROFILE, PROFILE_DETAIL -> tr("atomchat.page.profile.title");
+            };
+            Profile profile = nav.page() == AppPage.PROFILE || nav.page() == AppPage.PROFILE_DETAIL
+                    ? NativeMiuixProfile.snapshot(client, profilePage.subject(), avatarStore) : null;
+            // Profile state is built separately and must register its live identity
+            // even though conversation rows are no longer constructed on this route.
+            if (profile != null && profile.player() != null) {
+                Player subject = profile.player();
+                UUID uuid = subject.uuid() == null || subject.uuid().isEmpty() ? null : UUID.fromString(subject.uuid());
+                players.put(subject.key(), PlayerRef.of(uuid, subject.name()));
+            }
+            if (nav.target() != null) player(nav.target());
+            return new State(new Route(nav.page().id(), nav.target() == null ? "" : nav.target().key(), title,
+                    section, !nav.isRoot(), readonly, readonly ? readOnlyHintForNav(nav) : ""),
+                    List.copyOf(conversations), List.copyOf(messages), composerState,
+                    settingsPage ? settings(nav.section()) : new Settings("", List.of(), List.of(), List.of(), List.of()), profile,
+                    new Extras(chatPage ? com.atom.chat.reaction.ReactionEmoji.ALL : List.of(), chatPage ? stickerRows : List.of(), List.copyOf(phrases),
+                            history == null ? 0 : history.remaining(),
+                            now < miuixFeedbackUntil ? miuixFeedback : "",
+                            miuixFeedbackSuccess, miuixCropper.editor(),
+                            isWorldChatPage() && !readonly && composerFocus
+                                    ? miuixSuggestions.snapshot(client, composer.text(), input == null ? 0 : input.getCursorPosition()) : List.of(),
+                            List.copyOf(notices), miuixJump, worldFeed.mode().name()),
+                    new Appearance(cfg.accentColor, cfg.panelBgColor, cfg.textPrimaryColor, cfg.textSecondaryColor,
+                            cfg.ownBubbleColor, cfg.bubbleTextColor, cfg.otherBubbleColor, cfg.otherBubbleTextColor,
+                            cfg.panelOpacity, cfg.cornerRadius, cfg.blurEnabled && !WallpaperStore.isSet(),
+                            WallpaperStore.isSet() ? "wallpaper" : "", cfg.effectiveAvatarStyle().name()),
+                    cfg.animationEnabled, cfg.effectiveMiuixNavigationStyle().name());
+        }
+
+        private void addSticker(java.util.List<Sticker> rows, File file, boolean server) {
+            String key = "sticker:" + file.toPath().toAbsolutePath() + ":" + file.lastModified() + ":" + file.length();
+            stickerFiles.put(key, file.toPath());
+            rows.add(new Sticker(key, file.getName(), server));
+        }
+
+        private Player player(PlayerRef ref) {
+            players.put(ref.key(), ref);
+            String identity = ref.uuid() == null ? ref.key() : ref.uuid().toString();
+            return new Player(ref.key(), ref.uuid() == null ? "" : ref.uuid().toString(), ref.realName(),
+                    ref.displayName(), contextActions.isOnlinePlayer(ref), BlockList.isBlocked(ref),
+                    "avatar:" + identity, "hat:" + identity);
+        }
+
+        private record MessageInputs(List<Player> players, boolean images, boolean compact,
+                                     int timestampMinutes, boolean animateEntry, long reactionGeneration,
+                                     List<List<com.atom.chat.reaction.ReactionWire.Entry>> reactions,
+                                     UUID reactingPlayer, boolean reactionsEnabled, String language) {}
+
+        private List<Message> messages(List<ChatMessage> retained, int start) {
+            List<ChatMessage> visible = retained.subList(start, retained.size());
+            ChatMessage predecessor = start > 0 ? retained.get(start - 1) : null;
+            boolean changed = !visible.equals(messageSources) || predecessor != messagePredecessor;
+            if (changed) {
+                messageSources = List.copyOf(visible);
+                messagePredecessor = predecessor;
+                java.util.Map<String, PlayerRef> senders = new java.util.LinkedHashMap<>();
+                for (ChatMessage row : visible) if (!row.isSystem()) {
+                    PlayerRef ref = PlayerRef.of(row.getSenderUuid(), row.getProfileName());
+                    senders.put(ref.key(), ref);
+                }
+                messagePlayers = List.copyOf(senders.values());
+                // Fingerprints depend on message bodies. Compute them only when
+                // source rows change, then compare live reaction snapshots by key.
+                messageReactionKeys = visible.stream().map(com.atom.chat.reaction.ReactionClient::key).toList();
+            }
+            // Re-register live players on cache hits: image lookup and context
+            // callbacks resolve against this frame's indexes, not copied names.
+            List<Player> senderState = messagePlayers.stream().map(this::player).toList();
+            AtomChatConfig cfg = AtomChatConfig.get();
+            MessageInputs next = new MessageInputs(senderState, cfg.imageMessagesEnabled,
+                    cfg.compactMessagesEnabled, cfg.timestampIntervalMinutes, cfg.messageEntryAnimation,
+                    com.atom.chat.reaction.ReactionClient.generation(),
+                    messageReactionKeys.stream().map(com.atom.chat.reaction.ReactionClient::entries).toList(),
+                    com.atom.chat.reaction.ReactionClient.self.get(),
+                    com.atom.chat.reaction.ReactionClient.enabled(), client.options.languageCode);
+            if (changed || !next.equals(messageInputs)) {
+                java.util.ArrayList<Message> rows = new java.util.ArrayList<>(visible.size());
+                ChatMessage previous = predecessor;
+                for (ChatMessage row : visible) {
+                    rows.add(message(row, previous));
+                    previous = row;
+                }
+                messageRows = List.copyOf(rows);
+                messageInteractions = java.util.Map.copyOf(interactions);
+                messageInputs = next;
+            } else {
+                // Cached rich runs retain their stable callback tokens. Clearing
+                // this index without restoring it would silently disable links.
+                interactions.putAll(messageInteractions);
+            }
+            return messageRows;
+        }
+
+        private Message message(ChatMessage row, ChatMessage previous) {
+            Player sender = row.isSystem() ? null : player(PlayerRef.of(row.getSenderUuid(), row.getProfileName()));
+            String url = Cicodes.extractImageUrl(row.getRawText());
+            if (url == null) url = Cicodes.extractImageUrl(row.getContentText());
+            boolean imageMessage = com.atom.chat.chat.ImageCode.contains(row.getRawText());
+            boolean showImage = AtomChatConfig.get().imageMessagesEnabled;
+            String content = imageMessage ? (showImage && url != null ? "" : tr("atomchat.hud.image")) : row.getContentText();
+            java.util.ArrayList<Reaction> reactions = new java.util.ArrayList<>();
+            UUID reactionKey = com.atom.chat.reaction.ReactionClient.key(row);
+            for (com.atom.chat.reaction.ReactionWire.Entry entry : com.atom.chat.reaction.ReactionClient.entries(reactionKey))
+                reactions.add(new Reaction(entry.emoji(), entry.members().size(),
+                        com.atom.chat.reaction.ReactionClient.own(entry),
+                        entry.members().stream().map(com.atom.chat.reaction.ReactionWire.Member::name).toList(),
+                        com.atom.chat.reaction.ReactionClient.arrival(reactionKey, entry.emoji())));
+            return new Message(row.getId(), row.getTimestamp(), sender, row.isOwn(), row.isSystem(),
+                    row.getRawText(), content, runs(row.getSenderRich(), row.getId() + ":sender"),
+                    imageMessage ? List.of() : runs(row.getContentRich(), row.getId() + ":body"), row.getQuoteName(), row.getQuoteText(),
+                    runs(row.getQuoteNameRich(), row.getId() + ":quoteName"), runs(row.getQuoteTextRich(), row.getId() + ":quote"),
+                    row.getDuplicateCount(), url == null || !showImage ? "" : "media:" + url,
+                    com.atom.chat.reaction.ReactionClient.available(row), List.copyOf(reactions),
+                    AtomChatConfig.get().compactMessagesEnabled && !timeDivider(row, previous)
+                            && com.atom.chat.chat.MessageGrouping.isSameGroup(previous, row),
+                    timeDivider(row, previous) ? java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+                            .withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.ofEpochMilli(row.getTimestamp())) : "",
+                    AtomChatConfig.get().messageEntryAnimation && row.getTimestamp() >= openStart);
+        }
+
+        private boolean timeDivider(ChatMessage current, ChatMessage previous) {
+            int minutes = AtomChatConfig.get().timestampIntervalMinutes;
+            return minutes > 0 && (previous == null || current.getTimestamp() - previous.getTimestamp() >= minutes * 60_000L);
+        }
+
+        private List<Run> runs(RichText rich, String prefix) {
+            if (rich == null) return List.of();
+            java.util.ArrayList<Run> out = new java.util.ArrayList<>();
+            int i = 0;
+            for (RichText.RichRun run : rich.runs()) {
+                Style style = run.style();
+                String token = prefix + ":" + i++;
+                if (style.getClickEvent() != null || style.getHoverEvent() != null || style.getInsertion() != null)
+                    interactions.put(token, style);
+                else token = "";
+                out.add(new Run(run.text(), style.getColor() == null ? null : 0xFF000000 | style.getColor().getValue(),
+                        style.isBold(), style.isItalic(), style.isUnderlined(), style.isStrikethrough(),
+                        style.isObfuscated(), token));
+            }
+            return List.copyOf(out);
+        }
+
+        private Settings settings(SettingsSection section) {
+            java.util.ArrayList<Section> sections = new java.util.ArrayList<>();
+            for (SettingsSection value : SettingsSection.values())
+                sections.add(new Section(value.id(), tr("atomchat.settings." + value.id())));
+            java.util.ArrayList<Setting> rows = new java.util.ArrayList<>();
+            java.util.ArrayList<Preset> presets = new java.util.ArrayList<>();
+            if (section != null) {
+                for (com.atom.chat.settings.SettingsItem item : com.atom.chat.settings.SettingsCatalog.items(section)) {
+                    if (section == SettingsSection.APPEARANCE && item.id().equals("outline")) continue;
+                    rows.add(new Setting(item.id(), "switch", tr(item.titleKey()), tr(item.subtitleKey()),
+                            section == SettingsSection.ABOUT ? "about_advanced" : "",
+                            item.available(), item.value(), 0, 0, 1, 1, "", 0, List.of(), "", false, List.of(), 0));
+                }
+                for (com.atom.chat.settings.SettingsSlider item : com.atom.chat.settings.SettingsCatalog.sliders(section)) {
+                    if (section == SettingsSection.APPEARANCE && item.id().equals("cardtint")) continue;
+                    rows.add(new Setting(item.id(), "slider", item.id().equals("corner_radius")
+                            ? tr("atomchat.miuix.panel_corners") : tr(item.titleKey()), "", "", true, false,
+                            item.value(), item.min(), item.max(), item.step(), item.displayValue(), 0, List.of(), "", false, List.of(), 0));
+                }
+                for (com.atom.chat.settings.SettingsColor item : com.atom.chat.settings.SettingsCatalog.colors(section)) {
+                    // Stock Miuix owns its semantic surfaces and typography.
+                    // Keep original-only controls in the AtomChat style instead
+                    // of exposing native preferences that have no visual effect.
+                    if (java.util.Set.of("secondary_capsule_bg", "secondary_capsule_text", "panel_bg",
+                            "text_primary", "text_secondary", "card", "outline").contains(item.id())) continue;
+                    java.util.ArrayList<Integer> swatches = new java.util.ArrayList<>();
+                    for (int i = 0; i < item.swatchCount(); i++) swatches.add(item.swatchColor(i));
+                    rows.add(new Setting(item.id(), "color", tr(item.titleKey()), "", item.group(), true, false,
+                            0, 0, 0, 0, com.atom.chat.avatar.ColorUtil.formatHex(item.value()), item.value(),
+                            List.copyOf(swatches), "", false, List.of(), 0));
+                }
+                if (section == SettingsSection.APPEARANCE) {
+                    AtomChatConfig cfg = AtomChatConfig.get();
+                    choice(rows, "ui_style", "atomchat.settings.appearance.ui_style", new String[]{"ATOMCHAT", "MIUIX"}, cfg.effectiveUiStyle().ordinal());
+                    choice(rows, "miuix_theme_mode", "atomchat.miuix.theme_mode", new String[]{"LIGHT", "DARK"},
+                            panelIsDark(cfg.panelBgColor) ? 1 : 0);
+                    choice(rows, "miuix_navigation_style", "atomchat.settings.appearance.miuix_navigation_style",
+                            new String[]{"ICON_ONLY", "ICON_AND_TEXT", "SELECTED_LABEL", "FLOATING"}, cfg.effectiveMiuixNavigationStyle().ordinal());
+                    choice(rows, "page_nav_style", "atomchat.settings.appearance.page_nav_style", new String[]{"SLIDE", "ZOOM"}, cfg.pageNavStyle.ordinal());
+                    action(rows, "wallpaper_pick", "atomchat.settings.appearance.wallpaper", false);
+                    if (WallpaperStore.isSet()) action(rows, "wallpaper_clear", "atomchat.settings.appearance.wallpaper.clear", true);
+                    action(rows, "theme_preset_save", "atomchat.settings.appearance.preset.save", false);
+                    for (com.atom.chat.theme.AppearancePresetStore.Preset preset : com.atom.chat.theme.AppearancePresetStore.get().list())
+                        presets.add(new Preset(preset.id(), String.valueOf(preset.number()), preset.snapshot().accentColor(),
+                                preset.snapshot().panelBgColor(), preset.hasWallpaper()));
+                } else if (section == SettingsSection.CHAT) {
+                    AtomChatConfig cfg = AtomChatConfig.get();
+                    choice(rows, "avatar_style", "atomchat.settings.chat.avatar_style", new String[]{"ATOMCHAT", "E33CHAT"}, cfg.effectiveAvatarStyle().ordinal());
+                    String mode = cfg.teleportCommandMode == null ? "auto" : cfg.teleportCommandMode;
+                    choice(rows, "teleport_mode", "atomchat.settings.chat.teleport", new String[]{"auto", "tp", "tpa"},
+                            mode.equals("tp") ? 1 : mode.equals("tpa") ? 2 : 0);
+                    action(rows, "history_clear", "atomchat.settings.chat.history.clear", true);
+                    action(rows, "test_sound", "atomchat.settings.chat.test_sound", false);
+                } else if (section == SettingsSection.ABOUT) {
+                    java.util.ArrayList<com.atom.chat.settings.SettingsCatalog.InfoRow> info = new java.util.ArrayList<>(com.atom.chat.settings.SettingsCatalog.aboutCoreRows());
+                    info.addAll(com.atom.chat.settings.SettingsCatalog.thirdPartyRows());
+                    for (com.atom.chat.settings.SettingsCatalog.InfoRow item : info) {
+                        String group = item.titleKey().endsWith(".version") ? "about_version"
+                                : item.titleKey().endsWith(".repo") || item.titleKey().endsWith(".license")
+                                    ? "about_modinfo" : "about_thirdparty";
+                        rows.add(new Setting(item.titleKey() + item.value(), "info", tr(item.titleKey()), item.value(), group, true,
+                                false, 0, 0, 0, 0, item.value(), 0, List.of(), item.uri(), false, List.of(), 0));
+                    }
+                    rows.add(new Setting("about_credits", "info", tr("atomchat.settings.about.authors"),
+                            tr("atomchat.miuix.about.credits"), "about_credits", true, false,
+                            0, 0, 0, 0, "E33EPUS · NoWordz", 0, List.of(), "", false, List.of(), 0));
+                    action(rows, "cache_clear", "atomchat.settings.about.cache.clear", true);
+                }
+            }
+            return new Settings(section == null ? "" : section.id(), List.copyOf(sections), List.copyOf(rows),
+                    List.copyOf(presets), section == SettingsSection.PRIVACY
+                            ? SettingsSectionPage.blockedPlayers().stream().map(this::player).toList() : List.of());
+        }
+
+        private void action(java.util.List<Setting> rows, String id, String titleKey, boolean destructive) {
+            String descriptionKey = titleKey + ".desc";
+            String description = tr(descriptionKey);
+            rows.add(new Setting(id, "action", tr(titleKey), description.equals(descriptionKey) ? "" : description, "", true, false,
+                    0, 0, 0, 0, "", 0, List.of(), "", destructive, List.of(), 0));
+        }
+
+        private void choice(java.util.List<Setting> rows, String id, String titleKey, String[] options, int index) {
+            List<String> labels = java.util.Arrays.stream(options).map(value -> tr(titleKey + "." + value.toLowerCase(java.util.Locale.ROOT))).toList();
+            rows.add(new Setting(id, "choice", tr(titleKey), tr(titleKey + ".desc"), "", true, false,
+                    0, 0, 0, 0, labels.get(index), 0, List.of(), "", false, labels, index));
+        }
+
+        private ChatMessage resolveMessage(String id) {
+            long key;
+            try { key = Long.parseLong(id); } catch (NumberFormatException error) { return null; }
+            for (ChatMessage row : ChatStore.get().snapshot()) if (row.getId() == key) return row;
+            for (PlayerRef partner : PrivateChatStore.knownPartners())
+                for (ChatMessage row : PrivateChatStore.messages(partner)) if (row.getId() == key) return row;
+            return null;
+        }
+
+        private PlayerRef resolvePlayer(String key) {
+            PlayerRef ref = players.get(key);
+            if (ref != null) return ref;
+            if (key != null && key.startsWith("n:")) return PlayerRef.of(null, key.substring(2));
+            return null;
+        }
+
+        private String noticeId(com.atom.chat.notification.NotificationBanner.Active banner) {
+            return banner.type().name() + ":" + banner.born() + ":" + (banner.message() == null ? 0 : banner.message().getId());
+        }
+
+        @Override
+        public void perform(Action action) {
+            if (closing) return;
+            com.atom.chat.audio.FeedbackSoundController.beginAction();
+            try {
+                if (action.command() != Command.SEND && action.command() != Command.CROP_TRANSFORM
+                        && action.command() != Command.AVATAR_CLICK
+                        && !(action.command() == Command.SET_SLIDER && !action.commit()))
+                    com.atom.chat.audio.FeedbackSoundController.play(com.atom.chat.audio.FeedbackCue.BUTTON);
+                String target = action.target() == null ? "" : action.target();
+                String value = action.value() == null ? "" : action.value();
+                ChatMessage message = resolveMessage(target);
+                PlayerRef player = resolvePlayer(target);
+                switch (action.command()) {
+                    case ROOT -> switchRoot(AppPage.fromId(target));
+                    case BACK -> requestBack();
+                    case CLOSE -> requestClose();
+                    case WORLD_CHAT -> openWorldChat();
+                    case PRIVATE_CHAT -> { if (player != null) openPrivateChat(player); }
+                    case PROFILE -> { if (player != null) openProfileDetail(player); }
+                    case AVATAR_CLICK -> {
+                        AvatarClickWiring.MessageFacts facts = message != null ? factsOf(message)
+                                : player == null ? null : AvatarClickWiring.MessageFacts.of(player.uuid(),
+                                player.realName(), player.displayName(), client.player != null
+                                        && client.player.getUUID().equals(player.uuid()), false);
+                        if (facts != null) {
+                            String identity = message != null ? "message:" + message.getId() : "player:" + player.key();
+                            int clickId = avatarClickIds.computeIfAbsent(identity, unused -> avatarClickIds.size());
+                            avatarWiring.handleAvatarClick(System.currentTimeMillis(), facts, clickId);
+                        }
+                    }
+                    case SETTINGS_SECTION -> openSettingsSection(SettingsSection.fromId(target));
+                    case SEND -> { if (!isPrivateReadOnly()) { if (quickPhrasePanel.isEditing()) endPhraseEdit(true); else sendMessage(composer.text()); } }
+                    case APPEND -> { if (!isPrivateReadOnly()) composer.append(value.isEmpty() ? target : value); }
+                    case REPLY -> { if (message != null) { replySlots.arm(message); syncReplySlot(); } }
+                    case CANCEL_REPLY -> { replySlots.disarm(); syncReplySlot(); }
+                    case FILTER -> cycleWorldFilter();
+                    case LOAD_EARLIER -> { List<ChatMessage> all = messageWiring.messagesForNav(topNav()); HistoryWindow h = historyWindowForNav(topNav(), all.size()); if (h != null) h.loadEarlier(); }
+                    case JUMP_LATEST -> currentScroll().scrollToBottom(true);
+                    case COPY_MESSAGE -> { if (message != null) feedback("atomchat.feedback.copied", copyToClipboard(message.getContentText())); }
+                    case COPY_TEXT -> feedback("atomchat.feedback.copied", copyToClipboard(value.isEmpty() ? target : value));
+                    case INTERACT -> { Style style = interactions.get(value.isEmpty() ? target : value); if (style != null) ComponentClickHandler.handle(style, client.hasShiftDown(),
+                            inserted -> composer.append(inserted), event -> defaultHandleGameClickEvent(event, client, AtomChatScreen.this)); }
+                    case MENTION -> { if (player != null && !isPrivateReadOnly()) composer.append("@" + player.realName() + " "); }
+                    case TELEPORT -> { if (player != null && contextActions.isOnlinePlayer(player)) contextActions.sendTeleportCommand(player); }
+                    case BLOCK -> { if (player != null) { contextActions.toggleBlock(player); conversationListPage.invalidateRows(); } }
+                    case POKE -> {
+                        if (player != null) avatarWiring.poke(AvatarClickWiring.MessageFacts.of(player.uuid(),
+                                player.realName(), player.displayName(), client.player != null
+                                        && client.player.getUUID().equals(player.uuid()), false));
+                    }
+                    case REACT -> { if (message != null) com.atom.chat.reaction.ReactionClient.toggle(message, value); }
+                    case PICK_IMAGE -> { if (!isPrivateReadOnly()) pickAndUploadImage(); }
+                    case SAVE_IMAGE -> {
+                        if (message != null) saveImage(message);
+                        else if (target.startsWith("media:")) {
+                            String url = target.substring(6);
+                            for (ChatMessage candidate : messageWiring.messagesForNav(topNav()))
+                                if (url.equals(Cicodes.extractImageUrl(candidate.getRawText()))) { saveImage(candidate); break; }
+                        }
+                    }
+                    case PREVIEW_IMAGE -> { /* Preview is Compose-owned; the UI opens image(message.imageKey). */ }
+                    case SET_SWITCH -> { for (SettingsSection section : SettingsSection.values()) for (com.atom.chat.settings.SettingsItem item : com.atom.chat.settings.SettingsCatalog.items(section))
+                        if (item.id().equals(target) && item.available()) item.set(Boolean.parseBoolean(value)); }
+                    case SET_SLIDER -> { for (SettingsSection section : SettingsSection.values()) for (com.atom.chat.settings.SettingsSlider item : com.atom.chat.settings.SettingsCatalog.sliders(section))
+                        if (item.id().equals(target)) { item.apply(Float.parseFloat(value)); if (action.commit()) item.persist(); } }
+                    case SET_COLOR -> { int color = (int) Long.parseLong(value); for (com.atom.chat.settings.SettingsColor item : com.atom.chat.settings.SettingsCatalog.colors(SettingsSection.APPEARANCE)) if (item.id().equals(target)) item.apply(color); }
+                    case SET_CHOICE -> setChoice(target, Integer.parseInt(value));
+                    case SETTINGS_ACTION -> {
+                        if (target.equals("wallpaper_pick")) pickNativeCrop("wallpaper");
+                        else if (target.equals("apply_preset")) settingsActions.handleSettingsAction(SettingsSectionPage.ACTION_THEME_PRESET_APPLY + value);
+                        else if (target.equals("delete_preset")) settingsActions.handleSettingsAction(SettingsSectionPage.ACTION_THEME_PRESET_DELETE + value);
+                        else settingsActions.handleSettingsAction(target);
+                    }
+                    case OPEN_LINK -> org.lwjgl.sdl.SDLMisc.SDL_OpenURL(java.net.URI.create(value.isEmpty() ? target : value).toASCIIString());
+                    case PICK_AVATAR -> pickNativeCrop("avatar");
+                    case CLEAR_AVATAR -> avatarWiring.handler().clearAvatar();
+                    case PICK_BANNER -> pickNativeCrop("banner");
+                    case CLEAR_BANNER -> avatarWiring.handler().clearBanner();
+                    case EDIT_SIGNATURE -> profileWiring.beginSignatureEdit();
+                    case SAVE_SIGNATURE -> { if (!profilePage.isSignatureEditing()) profileWiring.beginSignatureEdit(); composer.setText(value); profilePage.endSignatureEdit(true); }
+                    case CANCEL_SIGNATURE -> profilePage.endSignatureEdit(false);
+                    case ADD_STICKER -> pickEmoteFile();
+                    case SEND_STICKER -> { Path file = stickerFiles.get(target); if (file != null && !isPrivateReadOnly()) uploadAndAppend(file); }
+                    case DELETE_STICKER -> { Path file = stickerFiles.get(target); if (file != null && stickers.list().contains(file.toFile())) {
+                        stickers.remove(file.toFile()); stickersScannedAt = 0L;
+                    } }
+                    case ADD_PHRASE -> beginPhraseEdit(QuickPhrasePanel.ADD_NEW);
+                    case EDIT_PHRASE -> beginPhraseEdit(Integer.parseInt(target));
+                    case DELETE_PHRASE -> quickPhrasePanel.deleteAt(Integer.parseInt(target));
+                    case INSERT_PHRASE -> { boolean server = value.equals("server"); handlePhraseAction(new QuickPhrasePanel.Action(server ? QuickPhrasePanel.Action.INSERT_SERVER : QuickPhrasePanel.Action.INSERT, Integer.parseInt(target))); }
+                    case SAVE_PHRASE -> { if (!isPrivateReadOnly()) { if (!quickPhrasePanel.isEditing()) { int index = Integer.parseInt(target); beginPhraseEdit(index < 0 ? QuickPhrasePanel.ADD_NEW : index); } composer.setText(value); endPhraseEdit(true); } }
+                    case CANCEL_PHRASE -> endPhraseEdit(false);
+                    case CROP_TRANSFORM -> { String[] parts = value.split(","); if (parts.length == 3) miuixCropper.setTransform(Float.parseFloat(parts[0]), Float.parseFloat(parts[1]), Float.parseFloat(parts[2])); }
+                    case CROP_CONFIRM -> miuixCropper.confirm();
+                    case CROP_CANCEL -> miuixCropper.cancel();
+                    case COMPLETE -> {
+                        List<MiuixHost.Suggestion> options = miuixSuggestions.snapshot(client, composer.text(), input == null ? 0 : input.getCursorPosition());
+                        int index = Integer.parseInt(target);
+                        if (index >= 0 && index < options.size()) {
+                            MiuixHost.Suggestion suggestion = options.get(index);
+                            String current = composer.text();
+                            int from = Math.max(0, Math.min(current.length(), suggestion.start()));
+                            int to = Math.max(from, Math.min(current.length(), suggestion.end()));
+                            String completed = current.substring(0, from) + suggestion.text() + current.substring(to);
+                            setText(completed, from + suggestion.text().length(), from + suggestion.text().length());
+                        }
+                    }
+                    case NOTICE_OPEN, NOTICE_REPLY -> {
+                        for (com.atom.chat.notification.NotificationBanner.Active banner : com.atom.chat.notification.NotificationBanner.INSTANCE.snapshot()) {
+                            if (!noticeId(banner).equals(target)) continue;
+                            if (notificationJump.jumpToNotification(banner, layout(), messageListView)) {
+                                com.atom.chat.notification.NotificationBanner.INSTANCE.dismiss(banner);
+                                List<ChatMessage> all = messageWiring.messagesForNav(topNav());
+                                int index = NotificationJumpService.findMessageIndex(all, banner.message());
+                                if (index >= 0) {
+                                    HistoryWindow h = historyWindowForNav(topNav(), all.size());
+                                    while (h != null && h.visibleStart() > index && h.canLoadEarlier()) h.loadEarlier();
+                                    miuixJump = new MiuixHost.Jump(all.get(index).getId(), ++miuixJumpSequence);
+                                }
+                                if (action.command() == Command.NOTICE_REPLY) notificationJump.focusComposerForReply(isPrivateReadOnly());
+                            }
+                            break;
+                        }
+                    }
+                }
+                settleNavigation();
+            } finally {
+                com.atom.chat.audio.FeedbackSoundController.endAction();
+            }
+        }
+
+        private void setChoice(String id, int index) {
+            AtomChatConfig cfg = AtomChatConfig.get();
+            switch (id) {
+                case "ui_style" -> cfg.uiStyle = AtomChatConfig.UiStyle.values()[index];
+                case "miuix_theme_mode" -> cfg.panelBgColor = index == 0 ? 0xFFF5F7FA : 0xEE16191F;
+                case "miuix_navigation_style" -> cfg.miuixNavigationStyle = AtomChatConfig.MiuixNavigationStyle.values()[index];
+                case "page_nav_style" -> cfg.pageNavStyle = AtomChatConfig.PageNavStyle.values()[index];
+                case "avatar_style" -> cfg.avatarStyle = AtomChatConfig.AvatarStyle.values()[index];
+                case "teleport_mode" -> { cfg.teleportCommandMode = new String[]{"auto", "tp", "tpa"}[index]; TeleportCommands.reset(); }
+                default -> throw new IllegalArgumentException("Unknown choice: " + id);
+            }
+            AtomChatConfig.save(cfg);
+        }
+
+        private boolean panelIsDark(int color) {
+            double red = linearChannel((color >>> 16) & 255);
+            double green = linearChannel((color >>> 8) & 255);
+            double blue = linearChannel(color & 255);
+            return 0.2126 * red + 0.7152 * green + 0.0722 * blue < 0.5;
+        }
+
+        private double linearChannel(int channel) {
+            double value = channel / 255.0;
+            return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+        }
+
+        @Override
+        public void setText(String text, int cursor, int anchor) {
+            if (input == null || isPrivateReadOnly()) return;
+            input.setValue(text == null ? "" : text);
+            input.moveCursorTo(Math.max(0, Math.min(cursor, input.getValue().length())), false);
+            input.setHighlightPos(Math.max(0, Math.min(anchor, input.getValue().length())));
+            if (profilePage.isSignatureEditing()) syncProfileSignatureDraft();
+        }
+
+        @Override
+        public void requestTextInput(boolean focused, float x, float y, float w, float h) {
+            textFocus = focused;
+            if (input == null) return;
+            composer.setFocused(focused);
+            // Vanilla chat prevents its EditBox from losing focus. Native fields
+            // share it only as an OS input carrier, so explicitly allow a blur.
+            // Updating the anchor must not repeatedly resubmit vanilla preedit.
+            input.setCanLoseFocus(true);
+            if (getFocused() != (focused ? input : null)) setFocused(focused ? input : null);
+            if (input.isFocused() != focused) input.setFocused(focused);
+            input.setCanLoseFocus(false);
+            if (focused && miuixBridge != null) {
+                float[] anchor = miuixBridge.guiRect(x, y, w, h);
+                input.setX(Math.round(anchor[0])); input.setY(Math.round(anchor[1]));
+                input.setWidth(Math.max(1, Math.round(anchor[2]))); input.setHeight(Math.max(1, Math.round(anchor[3])));
+                client.textInputManager().setTextInputArea(Math.round(anchor[0]), Math.round(anchor[1]),
+                        Math.round(anchor[0] + Math.max(1, anchor[2])), Math.round(anchor[1] + Math.max(1, anchor[3])));
+            }
+        }
+
+        @Override public void composerFocusChanged(boolean focused) { composerFocus = focused; }
+
+        @Override
+        public byte[] image(String key) {
+            if (key == null || key.isEmpty()) return null;
+            if (key.startsWith("about-")) {
+                String asset = switch (key) {
+                    case "about-logo" -> "logo.png";
+                    case "about-wordmark" -> "logo_wordmark.png";
+                    case "about-author-e33epus" -> "authors/e33epus.png";
+                    case "about-author-nowordz" -> "authors/nowordz.png";
+                    default -> null;
+                };
+                if (asset == null) return null;
+                return aboutAssets.computeIfAbsent(key, ignoredKey -> {
+                    try (var stream = AtomChatScreen.class.getResourceAsStream("/assets/atomchat/" + asset)) {
+                        return stream == null ? null : stream.readAllBytes();
+                    } catch (java.io.IOException ignored) { return null; }
+                });
+            }
+            if (key.startsWith("crop:")) return miuixCropper.sourcePng();
+            Image image = null;
+            if (key.equals("wallpaper")) image = WallpaperImage.current(WallpaperStore.current());
+            else if (key.startsWith("media:")) image = ImageLoader.get().get(key.substring(6), true);
+            else if (key.startsWith("sticker:")) {
+                Path file = stickerFiles.get(key);
+                if (file == null) return null;
+                File local = file.toFile();
+                long stamp = local.lastModified() ^ local.length();
+                if (!java.util.Objects.equals(stickerStamps.get(key), stamp)) {
+                    stickerImages.invalidate(local); discardEncoding(key);
+                    stickerStamps.put(key, stamp);
+                }
+                image = stickerImages.image(local);
+            } else {
+                int colon = key.indexOf(':');
+                if (colon > 0) {
+                    String identity = key.substring(colon + 1);
+                    PlayerRef ref = players.values().stream().filter(p -> identity.equals(p.uuid() == null ? p.key() : p.uuid().toString())).findFirst().orElse(null);
+                    UUID uuid = null;
+                    try { uuid = UUID.fromString(identity); } catch (IllegalArgumentException ignored) { }
+                    String name = ref == null ? null : ref.realName();
+                    if (client.player != null && client.player.getUUID().equals(uuid)) name = client.player.getName().getString();
+                    if (key.startsWith("avatar:")) image = com.atom.chat.image.PlayerAvatar.face(uuid, name);
+                    else if (key.startsWith("hat:") && com.atom.chat.image.PlayerAvatar.isE33Chat() && name != null)
+                        image = com.atom.chat.image.AvatarRenderer.hat(com.atom.chat.image.SkinResolver.getSkin(uuid, name));
+                    else if (key.startsWith("banner:")) image = client.player != null && client.player.getUUID().equals(uuid)
+                            ? BannerImage.current(BannerStore.current()) : com.atom.chat.profile.ProfileSync.image(uuid, com.atom.chat.profile.ProfileField.BANNER);
+                }
+            }
+            if (image == null) return null;
+            java.lang.ref.WeakReference<Image> previous = encodedSources.get(key);
+            byte[] result = encodedImages.get(key);
+            if (previous == null || previous.get() != image || result == null) {
+                try (io.github.humbleui.skija.Data data = image.encodeToData(io.github.humbleui.skija.EncodedImageFormat.PNG)) {
+                    if (data == null) return null;
+                    result = data.getBytes();
+                    discardEncoding(key);
+                    encodedImages.put(key, result);
+                    encodedSources.put(key, new java.lang.ref.WeakReference<>(image));
+                    encodedBytes += result.length;
+                    while (encodedImages.size() > 512 || encodedBytes > 64L * 1024 * 1024) {
+                        String oldest = encodedImages.keySet().iterator().next();
+                        discardEncoding(oldest); stickerStamps.remove(oldest);
+                        if (oldest.startsWith("sticker:")) {
+                            int revision = oldest.lastIndexOf(':', oldest.lastIndexOf(':') - 1);
+                            if (revision > 8) stickerImages.invalidate(new File(oldest.substring(8, revision)));
+                        }
+                    }
+                }
+            }
+            return result;
+        }
+
+        private void discardEncoding(String key) {
+            byte[] removed = encodedImages.remove(key);
+            if (removed != null) encodedBytes -= removed.length;
+            encodedSources.remove(key);
+        }
+
+        private void clearImages() {
+            // Images are borrowed from their owning stores; release only our
+            // encoded copies and weak identities, never their native handles.
+            encodedImages.clear(); encodedSources.clear(); encodedBytes = 0;
+            stickerImages.clear(); stickerStamps.clear();
+        }
+
+        @Override public String text(String key, Object... args) { return tr(key, args); }
+        @Override public List<String> kaomoji() { return com.atom.chat.ui.EmojiPanel.kaomoji(); }
+        @Override public String readClipboard() { return client.keyboardHandler.getClipboard(); }
+        @Override public void writeClipboard(String text) { copyToClipboard(text); }
+        @Override public UiMetrics uiMetrics() {
+            return new UiMetrics(UiTokens.HEADER_HEIGHT, UiTokens.EDGE_CONTROL_INSET,
+                    UiTokens.LIST_PAD_X, UiTokens.PANEL_BOTTOM_PAD, UiTokens.FONT_BODY,
+                    UiTokens.FONT_INPUT, UiTokens.FONT_NAME, UiTokens.FONT_QUOTE,
+                    UiTokens.FONT_TITLE, UiTokens.FONT_TIME, UiTokens.AVATAR_SIZE,
+                    UiTokens.AVATAR_GAP, UiTokens.ACTION_BUTTON_SIZE, UiTokens.BUTTON_W,
+                    UiTokens.BUTTON_H, UiTokens.INPUT_MAX_LINES);
+        }
+        @Override public UiPalette uiPalette() {
+            AtomChatConfig cfg = AtomChatConfig.get();
+            return new UiPalette(UiTokens.cardCutout(), cfg.textPrimaryColor, cfg.textSecondaryColor,
+                    cfg.secondaryCapsuleBg, cfg.secondaryCapsuleText, cfg.panelOutlineColor, cfg.panelOutline);
+        }
+        @Override public String hoverText(String token) {
+            Style style = interactions.get(token);
+            if (style == null) return "";
+            net.minecraft.network.chat.HoverEvent hover = style.getHoverEvent();
+            if (hover instanceof net.minecraft.network.chat.HoverEvent.ShowText text)
+                return text.value().getString();
+            if (hover instanceof net.minecraft.network.chat.HoverEvent.ShowEntity entity)
+                return entity.entity().getTooltipLines().stream().map(Component::getString)
+                        .collect(java.util.stream.Collectors.joining("\n"));
+            if (hover instanceof net.minecraft.network.chat.HoverEvent.ShowItem item)
+                return item.item().create().getTooltipLines(
+                        net.minecraft.world.item.Item.TooltipContext.of(client.level), client.player,
+                        client.options.advancedItemTooltips ? net.minecraft.world.item.TooltipFlag.ADVANCED
+                                : net.minecraft.world.item.TooltipFlag.NORMAL)
+                        .stream().map(Component::getString).collect(java.util.stream.Collectors.joining("\n"));
+            return style.getClickEvent() instanceof net.minecraft.network.chat.ClickEvent.OpenUrl url
+                    ? url.uri().toString() : "";
+        }
+        @Override public long pokeTime(String playerKey) {
+            PlayerRef player = resolvePlayer(playerKey);
+            return player == null ? 0L : miuixPokes.getOrDefault(player.uuid(), 0L);
+        }
+    }
+
+    private void pickNativeCrop(String target) {
+        KeyMapping.releaseAll();
+        if (client.mouseHandler != null) ((MouseHandlerAccessor) client.mouseHandler).atomchat$setActiveButton(null);
+        Thread worker = new Thread(() -> {
+            Path file = FilePicker.pickImage(dialogBridge::suppressAutoIconify, dialogBridge::restoreAutoIconify,
+                    target.equals("avatar") ? AvatarStore::isSupportedName : target.equals("banner") ? BannerStore::isSupportedName : WallpaperStore::isSupportedName);
+            dialogBridge.refocusWindow();
+            if (file == null) return;
+            client.execute(() -> {
+                float aspect = target.equals("wallpaper") ? panelWidth() / panelHeight()
+                        : target.equals("banner") ? Math.max(1, listLayout().list.w() - UiTokens.ROW_CLIP_INSET * 2) / UiTokens.PROFILE_BANNER_H : 1;
+                miuixCropper.open(file, target.equals("avatar"), aspect, target,
+                        bytes -> SettingsActions.cropperCallback(avatarStore, client).onConfirm(target, bytes));
+            });
+        }, "AtomChat-MiuixImagePicker");
+        worker.setDaemon(true); worker.start();
+    }
     /** How this screen was opened: from the vanilla chat box or from the AtomChat key. */
     public enum AtomChatOpenMode { DIRECT_WORLD, RESTORE }
 
@@ -210,6 +1000,8 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
 
         @Override
         public void pokeWobble(java.util.UUID uuid, long nowMs) {
+            miuixPokes.put(uuid, nowMs);
+            while (miuixPokes.size() > 128) miuixPokes.remove(miuixPokes.keySet().iterator().next());
             messageListView.poke(uuid, nowMs);
         }
 
@@ -539,7 +1331,7 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
     private final InputGate gate = new InputGate(new InputGate.Host() {
         @Override
         public boolean panelAnimating() {
-            return PanelOpenMotion.animating(panelProgress, closing);
+            return panelInputAnimating();
         }
     })
             .add(new ClosingStateInput())
@@ -1289,8 +2081,6 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
     private long lastFrameNanos = System.nanoTime();
     private long blurWarmupStartedNanos;
     private static final long BLUR_WARMUP_NANOS = 250_000_000L;
-    /** Composer height seen by the previous blur-gate frame, for change detection. */
-    private float lastBlurInputExtraH;
     private boolean blurDrawnThisFrame;
 
     // Per-frame animation state (smooth hover/popup transitions)
@@ -1868,17 +2658,6 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
             this.client.setScreenAndShow(null);
             return;
         }
-        // Feed the blur cadence gate: camera or panel-chrome motion keeps the
-        // every-2-frames blur refresh; a still scene drops to the slow fallback
-        // (see BlurMotionGate). The pre-pass below asks the gate per frame.
-        boolean chromeAnimating = PanelOpenMotion.chromeAnimating(panelSettled,
-                composer.extraH(), lastBlurInputExtraH);
-        BlurMotionGate.noteFrame(System.currentTimeMillis(),
-                client.player != null ? client.player.getYRot() : 0.0F,
-                client.player != null ? client.player.getXRot() : 0.0F,
-                chromeAnimating);
-        lastBlurInputExtraH = composer.extraH();
-
         // The blur is drawn with the panel background, inside the same open/
         // close layer. Pending readback must not select an opaque background.
         blurDrawnThisFrame = false;
@@ -1888,8 +2667,12 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         // widget chrome; our UI is fully Skia-drawn, the suggestor renders explicitly.
         PanelRasterBounds rasterBounds = PanelRasterBounds.of(client.getWindow().getWidth(),
                 client.getWindow().getHeight(), uiDensity(), panelX(), panelY(), panelWidth(), panelHeight());
+        if (!nativeMiuix()) PanelBlurRenderer.classicWorldBounds(rasterBounds);
+        nativeFrameNanos = System.nanoTime();
         graphics.draw(context, null, uiDensity(), rasterBounds,
+                () -> nativeFrameNeedsRedraw(mouseX, mouseY),
                 (canvas, worldSnapshot) -> drawPhone(canvas, worldSnapshot, mouseX, mouseY, delta));
+        if (nativeMiuix()) return;
         // The hidden EditBox stays positioned so the IME floating window anchors
         // correctly; its text/cursor are drawn by Skia above. The suggestion popup
         // still renders through the vanilla pipeline on top. Root pages do not
@@ -2121,7 +2904,50 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         }
     }
 
+    @Override
+    public void tick() {
+        super.tick();
+        // Minimized-window acquisition can skip rendering entirely. Input hold
+        // recovery must also run on the client tick, independently of drawing.
+        if (nativeMiuix() && !client.isWindowActive()) {
+            miuixInputModifiers = 0;
+            miuixNavigationInput.releaseEscape();
+            if (miuixBridge != null) miuixBridge.focused(false);
+        }
+    }
+
+    private boolean nativeFrameNeedsRedraw(int mouseX, int mouseY) {
+        if (!nativeMiuix()) return true;
+        if (miuixBridge == null) miuixBridge = new NativeMiuixBridge(miuixHost);
+        boolean focused = client.isWindowActive();
+        if (!focused) {
+            miuixInputModifiers = 0;
+            // An OS focus change can omit key-up. Reset only the physical hold;
+            // a deferred back still belongs to its original native transition.
+            miuixNavigationInput.releaseEscape();
+        }
+        boolean changed = miuixBridge.prepareWithInput(panelX(), panelY(), panelWidth(), panelHeight(), uiDensity(),
+                (float) client.getWindow().getGuiScale(), panelProgress, nativeFrameNanos,
+                focused, mouseX, mouseY, miuixModifiers());
+        // Session start and rendering use the same monotonic clock.
+        boolean effect = isWorldChatPage() && miuixCropper.editor() == null
+                && chatEffects.session().active(com.atom.chat.fun.ChatEffectPresentation.nowMs());
+        boolean effectChanged = effect || nativeEffectsActive;
+        nativeEffectsActive = effect;
+        return changed || effectChanged;
+    }
+
     private void drawPhone(Canvas canvas, Image worldSnapshot, int mouseX, int mouseY, float delta) {
+        if (nativeMiuix()) {
+            if (miuixBridge == null) miuixBridge = new NativeMiuixBridge(miuixHost);
+            miuixBridge.draw(canvas, panelX(), panelY(), panelWidth(), panelHeight(), uiDensity(),
+                    (float) client.getWindow().getGuiScale(), panelProgress, nativeFrameNanos);
+            if (isWorldChatPage() && miuixCropper.editor() == null)
+                com.atom.chat.fun.ChatEffectRenderer.draw(canvas, layout(), chatEffects.session(),
+                        com.atom.chat.fun.ChatEffectPresentation.nowMs());
+            return;
+        }
+        if (miuixBridge != null) { miuixBridge.close(); miuixBridge = null; miuixHost.clearImages(); }
         float x = panelX();
         float y = panelY();
         float progress = panelProgress;
@@ -2172,6 +2998,14 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
     }
 
     private void requestClose() {
+        if (closing) return;
+        // Escape may naturally reverse an opening panel. Once open, finish the
+        // inner page motion before starting the independent outer close motion.
+        if (nativeMiuix() && !panelInputAnimating() && miuixHost.navigationBusy()) {
+            miuixNavigationInput.defer(NativeNavigationInput.Request.CLOSE);
+            return;
+        }
+        miuixNavigationInput.clear();
         closing = true;
     }
 
@@ -2200,6 +3034,9 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
 
     @Override
     public void removed() {
+        if (miuixBridge != null) { miuixBridge.close(); miuixBridge = null; }
+        miuixHost.clearImages();
+        miuixCropper.close();
         graphics.close();
         chatEffects.close();
         avatarWiring.poke().uninstall();
@@ -2419,7 +3256,7 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         if (reply != null) {
             UiLayout.Rect replyRect = layout.replyBar;
             float replyH = s(26);
-            SkiaDraw.drawRoundedRect(canvas, replyRect.x(), replyRect.y(), replyRect.w(), replyH,
+            com.atom.chat.ui.UiSurfaces.background(canvas, replyRect.x(), replyRect.y(), replyRect.w(), replyH,
                     UiTokens.radius(8), UiTokens.quoteAccent(accent()));
             Font replyFont = FontManager.font(UiTokens.FONT_NAME);
             String replyLabel = tr("atomchat.reply.to", messageSenderName(reply),
@@ -2433,8 +3270,7 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         // card never has message content underneath it.
         UiLayout.Rect bar = layout.inputBar;
         boolean readOnly = view.readOnly();
-        SkiaDraw.drawChromeShadow(canvas, bar.x(), bar.y(), bar.w(), bar.h(), UiTokens.chromeRadius());
-        SkiaDraw.drawRoundedRect(canvas, bar.x(), bar.y(), bar.w(), bar.h(), UiTokens.chromeRadius(), UiTokens.cardFill());
+        com.atom.chat.ui.UiSurfaces.chrome(canvas, bar.x(), bar.y(), bar.w(), bar.h(), UiTokens.chromeRadius());
         if (quickPhrasePanel.isEditing()) {
             // The composer is borrowed as the phrase editor: ring it with the
             // accent so the mode is unmistakable.
@@ -2759,9 +3595,15 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         }
     }
 
-            private void drawBottomTabBar(Canvas canvas, UiLayout layout, AppPage rootPage) {
+    private String[] bottomTabLabels;
+
+    private void drawBottomTabBar(Canvas canvas, UiLayout layout, AppPage rootPage) {
         int selectedIndex = director.rootIndex(rootPage);
-        bottomTabBar.render(canvas, layout.tabBar, selectedIndex, textPrimary(), accent());
+        if (bottomTabLabels == null) {
+            bottomTabLabels = new String[]{tr("atomchat.tab.chat"),
+                    tr("atomchat.page.profile.title"), tr("atomchat.tab.settings")};
+        }
+        bottomTabBar.render(canvas, layout.tabBar, selectedIndex, textPrimary(), accent(), bottomTabLabels);
     }
 
     /** Routes a root-page click on one of the three bottom tab cells. */
@@ -2897,13 +3739,33 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
 
     /** Raises a transient action acknowledgement in the panel's floating layer. */
     private void feedback(String key, boolean success) {
+        miuixFeedback = tr(key);
+        miuixFeedbackSuccess = success;
+        miuixFeedbackUntil = System.currentTimeMillis() + 3000;
         notificationJump.feedback(key, success);
     }
 
     /** Raises an acknowledgement whose text carries an argument (a player name). */
     private void feedback(String key, String label, boolean success) {
+        miuixFeedback = tr(key, label);
+        miuixFeedbackSuccess = success;
+        miuixFeedbackUntil = System.currentTimeMillis() + 3000;
         notificationJump.feedback(key, label, success);
     }
+
+    private int miuixModifiers() { return miuixInputModifiers; }
+
+    /** Scene semantics are exposed for the existing in-game interaction probes. */
+    public List<String> nativeMiuixTags() { return miuixBridge == null ? List.of() : miuixBridge.tags(); }
+
+    public float[] nativeMiuixBounds(String tag) { return miuixBridge == null ? null : miuixBridge.boundsForTag(tag); }
+
+    public float[] nativeMiuixTextBounds(String label) { return miuixBridge == null ? null : miuixBridge.boundsForText(label); }
+
+    /** SDL IME preedit uses the same Compose edit session as committed characters. */
+    public void nativeMiuixComposingText(String text) { if (miuixBridge != null) miuixBridge.composingText(text); }
+
+    public void nativeMiuixFinishComposingText() { if (miuixBridge != null) miuixBridge.finishComposingText(); }
 
     /** The test-poke command's door: {@code /atomchat test poke} lands here. */
     public void onTestPoked(UUID target, String targetName) {
@@ -2932,6 +3794,10 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (nativeMiuix()) {
+            if (miuixBridge != null && !panelInputAnimating()) miuixBridge.pointer(3, mouseX, mouseY, horizontalAmount, verticalAmount, -1, miuixModifiers());
+            return true;
+        }
         Boolean direct = gate.scroll(mouseX, mouseY, horizontalAmount, verticalAmount);
         if (direct != null) {
             return direct;
@@ -2943,6 +3809,10 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         double mouseX = event.x(), mouseY = event.y();
         int button = LegacyInput.mouseButton(event.button());
+        if (nativeMiuix()) {
+            if (miuixBridge != null && !panelInputAnimating()) miuixBridge.pointer(1, mouseX, mouseY, 0, 0, button, miuixModifiers());
+            return true;
+        }
         // Completes the input trio next to keyPressed:/charTyped:. The whole UI is
         // Skia-drawn, so without this line a "the button does nothing" report has
         // no way to tell "the click never arrived" from "it arrived somewhere
@@ -2967,6 +3837,10 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
         double mouseX = event.x(), mouseY = event.y();
         int button = LegacyInput.mouseButton(event.button());
+        if (nativeMiuix()) {
+            if (miuixBridge != null && !panelInputAnimating()) miuixBridge.pointer(0, mouseX, mouseY, 0, 0, button, miuixModifiers());
+            return true;
+        }
         Boolean direct = gate.drag(mouseX, mouseY, button, dragX, dragY);
         if (direct != null) {
             return direct;
@@ -2978,6 +3852,10 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
     public boolean mouseReleased(MouseButtonEvent event) {
         double mouseX = event.x(), mouseY = event.y();
         int button = LegacyInput.mouseButton(event.button());
+        if (nativeMiuix()) {
+            if (miuixBridge != null && !panelInputAnimating()) miuixBridge.pointer(2, mouseX, mouseY, 0, 0, button, miuixModifiers());
+            return true;
+        }
         Boolean direct = gate.release(mouseX, mouseY, button);
         if (direct != null) {
             return direct;
@@ -2991,20 +3869,83 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         int keyCode = LegacyInput.key(event);
         int scanCode = event.keycode();
         int modifiers = LegacyInput.modifiers(event);
+        if (nativeMiuix()) {
+            miuixInputModifiers = modifiers;
+            if (closing) return true;
+            if (keyCode == 256 && !miuixNavigationInput.pressEscape()) return true;
+            if (miuixBridge != null && miuixBridge.isComposingText()) {
+                return miuixBridge.key(keyCode, true, modifiers);
+            }
+            if (keyCode == GLFW_KEY_V && (modifiers & 2) != 0 && isWorldChatPage() && !isPrivateReadOnly()) {
+                DataFlavor flavor = ClipboardImages.peek();
+                if (flavor != null) { pasteFromClipboard(flavor); return true; }
+            }
+            // Keep vanilla's recent-chat traversal on a single-line composer.
+            // Native completion and multi-line caret movement retain priority.
+            if ((keyCode == 265 || keyCode == 264) && isWorldChatPage() && !isPrivateReadOnly()
+                    && miuixBridge != null && miuixBridge.hasTextFocus() && miuixHost.composerFocus
+                    && miuixSuggestions.snapshot(client, composer.text(), input.getCursorPosition()).isEmpty()
+                    && composer.wrappedInput(layout().inputTextMaxWidth()).size() < UiTokens.INPUT_MAX_LINES)
+                return vanillaKeyPressed(event);
+            boolean consumed = miuixBridge != null && miuixBridge.key(keyCode, true, modifiers);
+            if (!consumed && keyCode == 256) {
+                if (miuixCropper.editor() != null) miuixCropper.cancel();
+                else if (panelInputAnimating()) requestClose();
+                else if (miuixNavigationInput.backInFlight()) return true;
+                else if (!topNav().isRoot()) miuixHost.perform(new MiuixHost.Action(MiuixHost.Command.BACK));
+                else if (!miuixHost.navigationBusy()) requestClose();
+            }
+            return true;
+        }
         Boolean direct = gate.key(keyCode, scanCode, modifiers);
         if (direct != null) {
             return direct;
         }
+        return vanillaKeyPressed(event);
+    }
+
+    /** Both interfaces delegate unhandled keys and chat-history traversal to vanilla here. */
+    private boolean vanillaKeyPressed(KeyEvent event) {
         return super.keyPressed(event);
     }
 
     @Override
     public boolean charTyped(CharacterEvent event) {
+        if (nativeMiuix()) {
+            if (closing) return true;
+            return miuixBridge != null && miuixBridge.text(event.codepointAsString());
+        }
         for (char chr : event.codepointAsString().toCharArray()) {
             Boolean direct = gate.charTyped(chr, 0);
             if (direct != null) return direct;
         }
         return super.charTyped(event);
+    }
+
+    @Override
+    public boolean preeditUpdated(PreeditEvent event) {
+        if (nativeMiuix()) {
+            if (closing) return true;
+            if (miuixBridge != null) {
+                // Minecraft clears OS preedit before delivering committed code
+                // points. Cancel the temporary text here to avoid duplicating it.
+                if (event == null) miuixBridge.cancelComposingText();
+                else miuixBridge.composingText(event.fullText(), event.caretPosition());
+            }
+            return true;
+        }
+        return super.preeditUpdated(event);
+    }
+
+    @Override
+    public boolean keyReleased(KeyEvent event) {
+        if (nativeMiuix()) {
+            miuixInputModifiers = LegacyInput.modifiers(event);
+            if (LegacyInput.key(event) == 256) miuixNavigationInput.releaseEscape();
+            if (closing) return true;
+            return miuixBridge != null && miuixBridge.key(LegacyInput.key(event), false, miuixInputModifiers);
+        }
+        return super.keyReleased(event);
     }
 
 

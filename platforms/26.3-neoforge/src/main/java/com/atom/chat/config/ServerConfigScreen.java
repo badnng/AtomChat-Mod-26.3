@@ -223,7 +223,7 @@ public final class ServerConfigScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        extractBackground(context, mouseX, mouseY, delta);
+        // The 26.3 Screen wrapper already extracts the background before this call.
         super.extractRenderState(context, mouseX, mouseY, delta);
         context.centeredText(font, title, width / 2, 12, 0xFFFFFFFF);
         for (Row row : rows) {

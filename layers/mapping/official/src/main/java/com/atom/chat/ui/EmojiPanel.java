@@ -87,6 +87,13 @@ public final class EmojiPanel {
             "(∪.∪ )...zzz",
     };
 
+    private static final List<String> KAOMOJI_VALUES = List.of(KAOMOJI);
+
+    /** Shared with alternate presentations; keep one catalog per mapped target. */
+    public static List<String> kaomoji() {
+        return KAOMOJI_VALUES;
+    }
+
     private boolean reactionMode;
     public void openReaction() {
         reactionMode = true; open = true; tab = 0; scroll = 0; tabAnimFrom = -1;
@@ -289,9 +296,13 @@ public final class EmojiPanel {
         float ph = panelH();
         scroll = Math.max(0, Math.min(scroll, maxScroll()));
         canvas.save();
-        try (Paint layer = new Paint()) {
-            layer.setColor(Color.makeARGB((int) (255.0F * anim), 0, 0, 0));
-            canvas.saveLayer(Rect.makeXYWH(px - s(24), py - s(24), pw + s(48), ph + s(48)), layer);
+        try (Paint layer = anim < 1.0F ? new Paint().setColor(Color.makeARGB((int) (255.0F * anim), 0, 0, 0)) : null) {
+            if (layer != null) {
+                canvas.saveLayer(Rect.makeXYWH(px - s(24), py - s(24), pw + s(48), ph + s(48)), layer);
+            } else {
+                // A fully open panel needs no intermediate alpha surface.
+                canvas.save();
+            }
             float sc = 0.92F + 0.08F * anim;
             float cx = px + pw / 2.0F;
             float cy = py + ph / 2.0F;

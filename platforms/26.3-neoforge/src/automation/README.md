@@ -119,6 +119,16 @@ display-free GameTestServer. `java.awt.headless` does not make Minecraft
 headless. Set `atomchat.automation.hideWindow=false` on the Gradle run for a
 visible diagnostic session.
 
+For chat-page freeze diagnosis, use `--native-parity --render-stall-diagnostics
+--chat-hold-seconds 45` with `tools/run_neoforge_automation.py`. The optional hold
+accepts 0–120 seconds (default 0), stays on the chat page after the IME checks,
+and captures frames before and after. Window show/restore/raise calls log their
+entry, return and duration; the render watchdog also samples the
+`WINDOW_ACTIVATION` stage. `--show-window` starts visible with VSync; omitting it
+preserves the hidden-to-visible transition at the IME probe. Ordinary parity
+tests cap at 60 FPS in both modes. Keep an external process timeout for a driver
+stall, since a watchdog running inside the JVM cannot guarantee termination.
+
 `PASS` on a step means its stated condition succeeded. Page navigation checks
 require settled panel/page animations, a valid Skia surface, nontransparent pixel
 samples and at least two new GUI frames actually rendered after settling. A separate check requires successful

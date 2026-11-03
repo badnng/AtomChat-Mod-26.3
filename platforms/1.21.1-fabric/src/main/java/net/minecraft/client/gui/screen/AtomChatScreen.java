@@ -47,7 +47,6 @@ import com.atom.chat.page.PageHost;
 import com.atom.chat.page.ProfilePage;
 import com.atom.chat.font.FontManager;
 import com.atom.chat.mixin.MouseHandlerAccessor;
-import com.atom.chat.render.BlurMotionGate;
 import com.atom.chat.render.ClickableSpan;
 import com.atom.chat.screen.ScreenMetrics;
 import com.atom.chat.render.DrawPrimitives;
@@ -1279,8 +1278,6 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
     private float panelProgress = 0.0F;
     /** Wall-clock timestamp of the previous frame — the progress clock consumes real dt. */
     private long lastFrameNanos = System.nanoTime();
-    /** Composer height seen by the previous blur-gate frame, for change detection. */
-    private float lastBlurInputExtraH;
     private boolean blurDrawnThisFrame;
 
     // Per-frame animation state (smooth hover/popup transitions)
@@ -1845,17 +1842,6 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
             this.client.setScreen(null);
             return;
         }
-        // Feed the blur cadence gate: camera or panel-chrome motion keeps the
-        // every-2-frames blur refresh; a still scene drops to the slow fallback
-        // (see BlurMotionGate). The pre-pass below asks the gate per frame.
-        boolean chromeAnimating = PanelOpenMotion.chromeAnimating(panelSettled,
-                composer.extraH(), lastBlurInputExtraH);
-        BlurMotionGate.noteFrame(System.currentTimeMillis(),
-                client.player != null ? client.player.getYaw() : 0.0F,
-                client.player != null ? client.player.getPitch() : 0.0F,
-                chromeAnimating);
-        lastBlurInputExtraH = composer.extraH();
-
         // The blur pre-pass is raw GL and must run before Skia paints the panel.
         // Load the shader first so drawPanel knows whether it may use the
         // translucent tint or must keep the solid fallback. The actual draw
@@ -2410,7 +2396,7 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         if (reply != null) {
             UiLayout.Rect replyRect = layout.replyBar;
             float replyH = s(26);
-            SkiaDraw.drawRoundedRect(canvas, replyRect.x(), replyRect.y(), replyRect.w(), replyH,
+            com.atom.chat.ui.UiSurfaces.background(canvas, replyRect.x(), replyRect.y(), replyRect.w(), replyH,
                     UiTokens.radius(8), UiTokens.quoteAccent(accent()));
             Font replyFont = FontManager.font(UiTokens.FONT_NAME);
             String replyLabel = tr("atomchat.reply.to", messageSenderName(reply),
@@ -2424,8 +2410,7 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         // card never has message content underneath it.
         UiLayout.Rect bar = layout.inputBar;
         boolean readOnly = view.readOnly();
-        SkiaDraw.drawChromeShadow(canvas, bar.x(), bar.y(), bar.w(), bar.h(), UiTokens.chromeRadius());
-        SkiaDraw.drawRoundedRect(canvas, bar.x(), bar.y(), bar.w(), bar.h(), UiTokens.chromeRadius(), UiTokens.cardFill());
+        com.atom.chat.ui.UiSurfaces.chrome(canvas, bar.x(), bar.y(), bar.w(), bar.h(), UiTokens.chromeRadius());
         if (quickPhrasePanel.isEditing()) {
             // The composer is borrowed as the phrase editor: ring it with the
             // accent so the mode is unmistakable.
@@ -2750,9 +2735,15 @@ public final class AtomChatScreen extends ChatScreen implements PageHost, Notifi
         }
     }
 
-            private void drawBottomTabBar(Canvas canvas, UiLayout layout, AppPage rootPage) {
+    private String[] bottomTabLabels;
+
+    private void drawBottomTabBar(Canvas canvas, UiLayout layout, AppPage rootPage) {
         int selectedIndex = director.rootIndex(rootPage);
-        bottomTabBar.render(canvas, layout.tabBar, selectedIndex, textPrimary(), accent());
+        if (bottomTabLabels == null) {
+            bottomTabLabels = new String[]{tr("atomchat.tab.chat"),
+                    tr("atomchat.page.profile.title"), tr("atomchat.tab.settings")};
+        }
+        bottomTabBar.render(canvas, layout.tabBar, selectedIndex, textPrimary(), accent(), bottomTabLabels);
     }
 
     /** Routes a root-page click on one of the three bottom tab cells. */

@@ -4,6 +4,7 @@ import com.atom.chat.render.Animator;
 import com.atom.chat.render.Easing;
 import com.atom.chat.render.SkiaDraw;
 import com.atom.chat.theme.ThemeService;
+import com.atom.chat.ui.miuix.MiuixControls;
 import io.github.humbleui.skija.Canvas;
 import io.github.humbleui.skija.Color;
 
@@ -119,6 +120,7 @@ public final class ToggleSwitch {
         scale.begin(canvas, x + UiTokens.SWITCH_W / 2.0F, y + UiTokens.SWITCH_H / 2.0F);
         try {
             float p = Math.max(0.0F, Math.min(1.0F, anim.getValue()));
+            if (MiuixControls.toggle(canvas, x, y, p, accent, enabled)) return;
             SkiaDraw.drawRoundedRect(canvas, x, y, UiTokens.SWITCH_W, UiTokens.SWITCH_H,
                     UiTokens.radius(UiTokens.SWITCH_H / (2.0F * UiTokens.SCALE)),
                     dim(SkiaDraw.lerpColor(trackOff(), accent, p), op));

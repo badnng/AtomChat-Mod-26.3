@@ -4,6 +4,7 @@ import com.atom.chat.AtomChat;
 import com.atom.chat.config.AtomChatConfig;
 import com.atom.chat.render.SkiaSupport;
 import com.atom.chat.wallpaper.WallpaperStore;
+import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11C;
 
 import java.io.InputStream;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
@@ -72,14 +74,19 @@ public final class EnvironmentSummary {
     /**
      * 客户端每 tick 调一次，内部只放行一次。
      *
-     * <p>为什么挂在 tick 上而不是客户端初始化：GPU 那三行要一个【当前的 GL 上下文】，
-     * 只有渲染线程上有；而 tick 恰好跑在渲染线程上、又已经晚于窗口创建。放在更早的
-     * 初始化钩子里，三个加载器的时机各不相同，Fabric 的客户端入口更是在窗口出现之前。
+     * <p>旧版 OpenGL 目标使用当前线程的上下文；没有上下文就跳过 GPU 探测。
+     * 支持其他渲染后端的目标应通过重载传入自己的设备信息，不能假设 tick 所在的
+     * 渲染线程一定持有 OpenGL 上下文。
      *
      * @param reportedVersion 加载器元数据里的版本号（各平台 {@code AtomChat.version()}）
      * @param artifact        本模组的 jar 路径，取不到就给 null
      */
     public static void logOnce(String reportedVersion, Path artifact) {
+        logOnce(reportedVersion, artifact, EnvironmentSummary::gpuLine);
+    }
+
+    /** GPU 信息由目标的渲染后端提供；获取失败只影响 GPU 这一行，不回退到 OpenGL。 */
+    public static void logOnce(String reportedVersion, Path artifact, Supplier<String> gpu) {
         try {
             if (IDENTITY_DONE.compareAndSet(false, true)) {
                 AtomChat.LOGGER.info(com.atom.chat.diagnostics.AtomChatLog.message("startup", identityLine(reportedVersion, artifact)));
@@ -92,7 +99,7 @@ public final class EnvironmentSummary {
             // 只有这一处本来每帧就握着 debug 开关，而热路径上多一次配置读取是白花的。
             FrameProfile.setEnabled(config.debug);
             if (config.debug && DEBUG_BLOCK_DONE.compareAndSet(false, true)) {
-                AtomChat.LOGGER.info(com.atom.chat.diagnostics.AtomChatLog.message("startup", debugBlock(reportedVersion, artifact, config, EnvironmentSummary::gpuLine)));
+                AtomChat.LOGGER.info(com.atom.chat.diagnostics.AtomChatLog.message("startup", debugBlock(reportedVersion, artifact, config, gpu)));
             }
         } catch (Throwable t) {
             AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("startup", "AtomChat environment summary failed"), t);
@@ -131,7 +138,7 @@ public final class EnvironmentSummary {
         rows.put("runtime", runtimeLine());
         rows.put("laf", lafLine(loader));
         rows.put("skija", skijaLine(loader, artifact));
-        rows.put("gpu", gpu.get());
+        rows.put("gpu", probeGpu(gpu));
         rows.put("switches", switchesLine(config));
 
         StringBuilder sb = new StringBuilder(SUMMARY_HEADER);
@@ -326,19 +333,27 @@ public final class EnvironmentSummary {
     /**
      * GPU 三串（渲染器 / 驱动版本 / 厂商）。
      *
-     * <p><strong>只能在有当前 GL 上下文的线程上调用</strong>（客户端 tick 就是那个线程：
-     * 三个加载器的 tick 都跑在渲染线程上）。这不是"最好这样"，是硬约束：
-     * 没有上下文时 {@code glGetString} 不是抛异常，而是**把整个 JVM 带走** ——
-     * 实测在单测里调它，直接在 {@code lwjgl_opengl.dll} 里 SIGSEGV，
-     * 连 hs_err 都写出来了。{@code try/catch} 挡不住段错误，所以这里只留
-     * "调用者保证"这一道，并把探针做成可注入的（{@link #debugBlock}），
-     * 让单测根本走不到它。
+     * <p>仅供旧版 OpenGL 目标使用。在 Java 层先检查当前线程的 capabilities，
+     * 再进入原生函数。没有上下文时直接调用 {@code glGetString} 会终止 JVM，
+     * {@code try/catch} 无法拦截；现代目标使用后端提供的设备信息。
      */
-    private static String gpuLine() {
+    static String gpuLine() {
         try {
+            var capabilities = GL.getCapabilities();
+            if (capabilities == null || capabilities.glGetString == 0L) {
+                return "unavailable (no current OpenGL context)";
+            }
             return text(GL11C.glGetString(GL11C.GL_RENDERER)) + " | "
                     + text(GL11C.glGetString(GL11C.GL_VERSION)) + " | "
                     + text(GL11C.glGetString(GL11C.GL_VENDOR));
+        } catch (Throwable t) {
+            return "unavailable (" + describe(t) + ")";
+        }
+    }
+
+    private static String probeGpu(Supplier<String> gpu) {
+        try {
+            return text(gpu.get());
         } catch (Throwable t) {
             return "unavailable (" + describe(t) + ")";
         }

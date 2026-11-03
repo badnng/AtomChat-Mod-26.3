@@ -232,6 +232,9 @@ class PanelRasterBoundsTest {
                 copy[i] = pixels.get(i);
             }
             return copy;
+        } finally {
+            // Pixmap retains the native address, not the owning direct buffer.
+            java.lang.ref.Reference.reachabilityFence(buffer);
         }
     }
 

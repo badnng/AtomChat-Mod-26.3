@@ -1,0 +1,140 @@
+plugins {
+    id 'java-library'
+    id 'org.jetbrains.kotlin.jvm' version '2.4.20'
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.4.20'
+    id 'org.jetbrains.compose' version '1.12.1'
+}
+
+group = 'com.atom.chat.internal'
+version = rootProject.version
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+def nativePlatform = providers.gradleProperty('atomchat.nativePlatform').getOrElse('windows-x64')
+if (!(nativePlatform in ['windows-x64', 'linux-x64'])) {
+    throw new GradleException('Unsupported Compose native platform: ' + nativePlatform)
+}
+if (nativePlatform == 'linux-x64') {
+    layout.buildDirectory.set(file('build/linux-x64'))
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.encoding = 'UTF-8'
+}
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        optIn.addAll('androidx.compose.ui.InternalComposeUiApi', 'androidx.compose.ui.ExperimentalComposeUiApi')
+    }
+}
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    implementation 'org.jetbrains.compose.ui:ui-desktop:1.12.1'
+    implementation 'org.jetbrains.compose.foundation:foundation-desktop:1.12.1'
+    implementation 'org.jetbrains.compose.animation:animation-desktop:1.12.1'
+    implementation 'org.jetbrains.compose.runtime:runtime-desktop:1.12.1'
+    // Compose lists these as runtime dependencies; the embedded scene owns and
+    // drives their lifecycle directly, so their public APIs are compile inputs.
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-desktop:2.11.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-savedstate-desktop:2.11.0'
+    implementation 'androidx.navigationevent:navigationevent-desktop:1.1.2'
+    implementation 'top.yukonga.miuix.kmp:miuix-ui-desktop:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-shader-desktop:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-blur-desktop:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-icons-desktop:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-preference-desktop:0.9.4'
+    runtimeOnly "org.jetbrains.skiko:skiko-awt-runtime-${nativePlatform}:0.150.1"
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'atomchat.previewDir', layout.buildDirectory.dir('native-preview').get().asFile.absolutePath
+    maxParallelForks = 1 // Skiko/Compose scenes are render-thread owned.
+}
+
+// The font remains a resource in the outer mod JAR. Add it only to the Miuix
+// test classpath so the variable-font loader is exercised without bundling a
+// duplicate copy in the nested runtime.
+tasks.named('processTestResources') {
+    from('../platforms/26.3-neoforge/src/main/resources') {
+        include 'assets/atomchat/font/bundled.otf'
+    }
+}
+
+// One private nested runtime avoids exposing Compose dependency version ranges
+// to the game's loader. Merge service descriptors instead of dropping providers.
+abstract class MergeMiuixServices extends DefaultTask {
+    @Classpath abstract ConfigurableFileCollection getRuntimeJars()
+    @OutputDirectory abstract DirectoryProperty getOutputDirectory()
+    @javax.inject.Inject abstract org.gradle.api.file.FileSystemOperations getFileOperations()
+
+    @TaskAction
+    void merge() {
+        def providersByService = new TreeMap<String, Set<String>>()
+        runtimeJars.files.sort().each { dependency ->
+            if (dependency.name.endsWith('.jar')) {
+                new java.util.zip.ZipFile(dependency).withCloseable { archive ->
+                    archive.entries().each { entry ->
+                        if (!entry.directory && entry.name.startsWith('META-INF/services/')) {
+                            def providers = providersByService.computeIfAbsent(entry.name) { new LinkedHashSet<String>() }
+                            archive.getInputStream(entry).getText('UTF-8').readLines().each { line ->
+                                def provider = line.split('#', 2)[0].trim()
+                                if (!provider.isEmpty()) providers.add(provider)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        def output = outputDirectory.get().asFile
+        fileOperations.delete { delete(output) }
+        output.mkdirs()
+        providersByService.each { service, providers ->
+            def descriptor = new File(output, service)
+            descriptor.parentFile.mkdirs()
+            descriptor.setText(providers.join('\n') + '\n', 'UTF-8')
+        }
+    }
+}
+
+def mergedServices = layout.buildDirectory.dir('generated/runtime-services')
+def mergeRuntimeServices = tasks.register('mergeRuntimeServices', MergeMiuixServices) {
+    runtimeJars.from(configurations.runtimeClasspath)
+    outputDirectory = mergedServices
+}
+
+def bundledJar = tasks.register('bundledJar', Jar) {
+    dependsOn tasks.named('classes'), mergeRuntimeServices
+    archiveBaseName = 'atomchat-miuix-runtime'
+    archiveClassifier = nativePlatform
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(sourceSets.main.output)
+    from({ configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }) {
+        exclude 'META-INF/services/**', 'META-INF/MANIFEST.MF', 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA', 'META-INF/*.EC', 'META-INF/SIG-*'
+        exclude 'module-info.class', 'META-INF/versions/**/module-info.class', 'META-INF/INDEX.LIST'
+    }
+    from(mergedServices)
+    manifest.attributes('Implementation-Title': 'AtomChat private Miuix runtime',
+        'Implementation-Version': project.version, 'Automatic-Module-Name': 'com.atom.chat.miuix.runtime',
+        'Multi-Release': 'true')
+}
+
+configurations {
+    bundledRuntime {
+        canBeConsumed = true
+        canBeResolved = false
+    }
+}
+artifacts { bundledRuntime bundledJar }

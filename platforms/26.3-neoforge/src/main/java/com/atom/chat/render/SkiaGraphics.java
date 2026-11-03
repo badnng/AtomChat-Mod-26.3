@@ -21,6 +21,7 @@ import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.renderer.RenderPipelines;
 
 import java.util.function.BiConsumer;
+import java.util.function.BooleanSupplier;
 
 /**
  * Skia bridge for RenderPearl's extracted GUI. OpenGL draws into an offscreen
@@ -32,6 +33,7 @@ public final class SkiaGraphics implements AutoCloseable {
     private static Canvas prepassCanvas;
     private static long renderedFrames;
     private static boolean frameSubmitted;
+    private static SharedGlSession activeGpuSession;
     private Surface surface;
     private GpuSkiaSurface gpuSurface;
     private boolean gpuFailed;
@@ -43,6 +45,8 @@ public final class SkiaGraphics implements AutoCloseable {
     private int viewportHeight;
     private PanelRasterBounds bounds;
     private long visiblePixelSamples;
+    private long textureUpdates;
+    private long textureUploads;
 
     public void checkFrameBufferId() {
         var window = Minecraft.getInstance().getWindow();
@@ -89,61 +93,76 @@ public final class SkiaGraphics implements AutoCloseable {
 
     public void draw(GuiGraphicsExtractor extractor, Runnable preUi, float density, PanelRasterBounds requestedBounds,
                      BiConsumer<Canvas, Image> renderer) {
+        draw(extractor, preUi, density, requestedBounds, () -> true, renderer);
+    }
+
+    /** Keeps submitting the retained GUI texture when the producer's pixels are unchanged. */
+    public void draw(GuiGraphicsExtractor extractor, Runnable preUi, float density, PanelRasterBounds requestedBounds,
+                     BooleanSupplier redraw, BiConsumer<Canvas, Image> renderer) {
         RenderSystem.assertOnRenderThread();
         long profileStart = FrameProfile.start();
         long allocatedBefore = profileStart == 0L ? -1L : FrameProfile.allocatedBytes();
         checkFrameBufferId();
-        if (surface == null || !requestedBounds.equals(bounds)) {
+        boolean rebuilt = surface == null || !requestedBounds.equals(bounds);
+        if (rebuilt) {
             createSurface(requestedBounds);
         }
         if (density <= 0.0F) {
             density = Math.max(1.0F, viewportHeight / 1080.0F);
         }
-        Canvas canvas = surface.getCanvas();
-        if (gpuSurface != null) {
-            gpuSurface.begin();
-        }
-        try {
-            canvas.clear(0);
-            int baseline = canvas.getSaveCount();
-            canvas.save();
-            try {
-                // Keep both the physical-pixel blur pre-pass and design-space UI
-                // in their original screen coordinates on this smaller raster.
-                canvas.translate(-bounds.x(), -bounds.y());
-                // The blur coordinates use GUI scale; design density applies only
-                // after the blur has drawn into physical framebuffer coordinates.
-                prepassCanvas = canvas;
-                if (preUi != null) {
-                    preUi.run();
-                }
-                prepassCanvas = null;
-                canvas.scale(density, density);
-                renderer.accept(canvas, null);
-            } finally {
-                prepassCanvas = null;
-                int leaked = canvas.getSaveCount() - (baseline + 1);
-                canvas.restoreToCount(baseline);
-                if (leaked != 0 && com.atom.chat.config.AtomChatConfig.get().debug) {
-                    AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("render", "Skia canvas stack imbalance: {}"), leaked);
-                }
-            }
-        } finally {
+        boolean requested = redraw.getAsBoolean();
+        if (rebuilt || requested || preUi != null) {
+            textureUpdates++;
+            Canvas canvas = surface.getCanvas();
             if (gpuSurface != null) {
-                gpuSurface.end();
+                gpuSurface.begin();
             }
-        }
-        if (gpuSurface == null) {
-            if (!surface.readPixels(uploadPixels, 0, 0)) {
-                throw new IllegalStateException("Unable to convert Skia GUI to straight-alpha RGBA");
+            try {
+                activeGpuSession = gpuSurface == null ? null : gpuSurface.session();
+                canvas.clear(0);
+                int baseline = canvas.getSaveCount();
+                canvas.save();
+                try {
+                    // Keep both the physical-pixel blur pre-pass and design-space UI
+                    // in their original screen coordinates on this smaller raster.
+                    canvas.translate(-bounds.x(), -bounds.y());
+                    // The blur coordinates use GUI scale; design density applies only
+                    // after the blur has drawn into physical framebuffer coordinates.
+                    prepassCanvas = canvas;
+                    if (preUi != null) {
+                        preUi.run();
+                    }
+                    prepassCanvas = null;
+                    canvas.scale(density, density);
+                    renderer.accept(canvas, null);
+                } finally {
+                    prepassCanvas = null;
+                    int leaked = canvas.getSaveCount() - (baseline + 1);
+                    canvas.restoreToCount(baseline);
+                    if (leaked != 0 && com.atom.chat.config.AtomChatConfig.get().debug) {
+                        AtomChat.LOGGER.warn(com.atom.chat.diagnostics.AtomChatLog.message("render", "Skia canvas stack imbalance: {}"), leaked);
+                    }
+                }
+            } finally {
+                activeGpuSession = null;
+                if (gpuSurface != null) {
+                    gpuSurface.end();
+                }
             }
-            texture.upload();
-        } else if (gpuSurface.needsUpload()) {
-            texture.upload();
+            if (gpuSurface == null) {
+                if (!surface.readPixels(uploadPixels, 0, 0)) {
+                    throw new IllegalStateException("Unable to convert Skia GUI to straight-alpha RGBA");
+                }
+                texture.upload();
+                textureUploads++;
+            } else if (gpuSurface.needsUpload()) {
+                texture.upload();
+                textureUploads++;
+            }
+            // Automation requests this diagnostic explicitly; normal frames need
+            // neither an alpha scan nor Java accesses to the upload buffer.
+            visiblePixelSamples = -1;
         }
-        // Automation requests this diagnostic explicitly; normal frames need
-        // neither an alpha scan nor Java accesses to the upload buffer.
-        visiblePixelSamples = -1;
         extractor.pose().pushMatrix();
         try {
             // Scale physical coordinates exactly as the old full-window blit
@@ -169,6 +188,14 @@ public final class SkiaGraphics implements AutoCloseable {
             AtomChat.LOGGER.info(com.atom.chat.diagnostics.AtomChatLog.message("render", FrameProfile.summary()));
         }
     }
+
+    /** Available only inside the panel producer's current GL draw scope. */
+    public static SharedGlSession currentGpuSession() {
+        return activeGpuSession;
+    }
+
+    public long textureUpdates() { return textureUpdates; }
+    public long textureUploads() { return textureUploads; }
 
     static Canvas prepassCanvas() {
         return prepassCanvas;

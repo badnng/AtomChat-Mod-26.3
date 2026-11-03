@@ -21,6 +21,7 @@ public final class AutomationPresentationCapture {
 
     public static void afterRender() {
         AutomationBlurMotion.afterRender();
+        AutomationMiuixRegression.afterRender();
         var request = pending;
         if (request == null) return;
         pending = null;

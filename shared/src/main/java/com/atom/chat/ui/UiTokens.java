@@ -16,6 +16,15 @@ public final class UiTokens {
     public static final float SETTINGS_SWATCH_BOTTOM = s(22);
     public static final float SETTINGS_VALUE_BAND = s(24);
     public static final float HEADER_TEXT_GAP = s(8);
+    /** Optional miuix surfaces share one quiet elevation and border tier. */
+    public static final float MIUIX_SHADOW_BLUR = s(4);
+    public static final float MIUIX_SHADOW_Y = s(1);
+    public static final float MIUIX_BORDER_WIDTH = s(0.6F);
+    public static final float MIUIX_NAV_FLOATING_MAX_W = s(240);
+    public static final float MIUIX_NAV_FLOATING_H = s(48);
+    public static final float MIUIX_NAV_LABEL_SIZE = s(10);
+    public static final float MIUIX_NAV_LABEL_GAP = s(3);
+    public static final float MIUIX_NAV_INSET = s(5);
 
     /** Reference size and scaled font size for decorative chat emoji. */
     public static final float CHAT_EFFECT_EMOJI_BASE_SIZE = 24F;

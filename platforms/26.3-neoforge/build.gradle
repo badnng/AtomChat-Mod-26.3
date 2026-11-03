@@ -86,9 +86,9 @@ neoForge {
             gameDirectory = automationGameDirectory
             systemProperty 'atomchat.automation', 'true'
             systemProperty 'atomchat.automation.report', automationReportFile.absolutePath
-            systemProperty 'atomchat.automation.hideWindow', 'true'
+            systemProperty 'atomchat.automation.hideWindow', providers.gradleProperty('atomchat.automation.hideWindow').getOrElse('true')
             systemProperty 'atomchat.automation.timeoutSeconds', providers.gradleProperty('atomchat.automation.timeoutSeconds').getOrElse('420')
-            ['pairRole', 'controlDir', 'performance', 'blurMotion', 'width', 'height', 'sampleSeconds', 'warmupSeconds'].each { option ->
+            ['pairRole', 'controlDir', 'performance', 'blurMotion', 'width', 'height', 'sampleSeconds', 'warmupSeconds', 'uiStyle', 'profile', 'nativeParity', 'aboutPreview', 'previewSeconds', 'renderStallDiagnostics', 'chatHoldSeconds'].each { option ->
                 def value = providers.gradleProperty("atomchat.automation.${option}").orNull
                 if (value != null) {
                     systemProperty "atomchat.automation.${option}", value
@@ -138,6 +138,9 @@ repositories {
 
 dependencies {
     compileOnly "org.spongepowered:mixin:0.8.7"
+
+    // Kotlin/Compose/Miuix are kept in one OS-specific private nested runtime.
+    jarJar(implementation(project(path: ':ui-miuix', configuration: 'bundledRuntime')))
 
     // Skija (HumbleUI Skia bindings) — same line as the Tuui mod used.
     // NeoForge loads nested jars through JarJar; version ranges are required

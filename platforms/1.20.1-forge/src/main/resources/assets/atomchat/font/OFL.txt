@@ -1,7 +1,4 @@
-AtomChat bundles the following fonts:
-
-  - Noto Sans SC (regular, bundled.otf)
-  - Noto Sans CJK SC (bold, bundled-bold.otf)
+AtomChat bundles the Noto Sans SC variable font as bundled.otf (wght 100–900).
 
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name
 "Source". Copyright 2012 Google Inc. All Rights Reserved.

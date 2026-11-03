@@ -11,3 +11,5 @@ pluginManagement {
 }
 
 rootProject.name = 'atomchat'
+include ':ui-miuix'
+project(':ui-miuix').projectDir = file('../../ui-miuix')

@@ -78,9 +78,9 @@ public final class MenuPopup {
      */
     public static void drawSurface(Canvas canvas, float x, float y, float w, float h) {
         // Preserve the accepted inset-light gradient shared with the emoji panel.
-        com.atom.chat.render.SkiaDraw.drawRoundedRect(canvas, x, y, w, h,
+        UiSurfaces.background(canvas, x, y, w, h,
                 UiTokens.radius(SURFACE_RADIUS), SURFACE_COLOR);
-        com.atom.chat.render.SkiaDraw.drawRoundedShadow(canvas, x, y, w, h,
+        UiSurfaces.shadow(canvas, x, y, w, h,
                 UiTokens.radius(SURFACE_RADIUS), UiTokens.s(SURFACE_SHADOW_BLUR), UiTokens.CHROME_SHADOW);
     }
 
@@ -161,7 +161,7 @@ public final class MenuPopup {
         }
         float a = Math.max(0.0F, Math.min(1.0F, hoverAlpha));
         float inset = rowInset(rowW);
-        com.atom.chat.render.SkiaDraw.drawRoundedRect(canvas, rowX + inset, rowY + WASH_VERTICAL_INSET,
+        UiSurfaces.background(canvas, rowX + inset, rowY + WASH_VERTICAL_INSET,
                 rowW - inset * 2.0F, rowH - WASH_VERTICAL_INSET * 2.0F, UiTokens.radius(WASH_RADIUS),
                 io.github.humbleui.skija.Color.makeARGB(Math.round(WASH_ALPHA * a), 255, 255, 255));
     }

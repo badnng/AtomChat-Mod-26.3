@@ -11,12 +11,40 @@ its own copyright and license. This file collects the required notices.
 | Skija (Java bindings for Skia) | Apache License 2.0 | UI rendering bindings |
 | HumbleUI types | Apache License 2.0 | Geometry types shared with Skija |
 | FlatLaf | Apache License 2.0 | Modern Swing look and feel for the image picker |
-| Skia (native graphics engine) | BSD 3-Clause | Native rendering engine bundled through Skija platform artifacts |
+| Skia (native graphics engine) | BSD 3-Clause | Native rendering engines bundled through Skija and Skiko platform artifacts |
+| Kotlin standard library 2.4.20 | Apache License 2.0 | Runtime support for the Compose scene |
+| Compose Multiplatform 1.12.1 | Apache License 2.0 | Desktop composition, UI, foundation, and animation runtime |
+| Miuix Compose modules 0.9.4 | Apache License 2.0 | Native Miuix UI, preferences, blur, shaders, and icons |
+| Skiko 0.150.1 | Apache License 2.0 | Compose scene's Kotlin/JVM Skia runtime; OS-specific native |
+| AndroidX Lifecycle 2.11.0 and NavigationEvent 1.1.2 | Apache License 2.0 | Compose scene lifecycle and navigation runtime support |
 
 ## Apache License 2.0 components
 
 The following components are licensed under the Apache License, Version 2.0:
-Skija, HumbleUI types, and FlatLaf.
+Skija, HumbleUI types, FlatLaf, Kotlin standard library, Compose Multiplatform,
+Miuix, Skiko, AndroidX Lifecycle, and NavigationEvent.
+
+The active 26.3 NeoForge target packages Kotlin/Compose/Miuix/Skiko in the
+private `ui-miuix` nested runtime. The versions are pinned in
+`ui-miuix/build.gradle`; only the target operating system's Skiko native runtime
+is included. Upstream project and license details:
+
+- Kotlin: [JetBrains/kotlin](https://github.com/JetBrains/kotlin), [license notes](https://github.com/JetBrains/kotlin/blob/master/license/README.md)
+- Compose Multiplatform: [JetBrains/compose-multiplatform](https://github.com/JetBrains/compose-multiplatform), [LICENSE.txt](https://github.com/JetBrains/compose-multiplatform/blob/master/LICENSE.txt)
+- Miuix: [compose-miuix-ui/miuix](https://github.com/compose-miuix-ui/miuix), [Apache 2.0 license](https://github.com/compose-miuix-ui/miuix/blob/main/LICENSE)
+- Skiko: [JetBrains/skiko](https://github.com/JetBrains/skiko), [license](https://github.com/JetBrains/skiko/blob/master/LICENSE)
+- AndroidX: [AndroidX source](https://android.googlesource.com/platform/frameworks/support/)
+
+The bundled Compose and AndroidX artifacts retain their per-module license files
+under `META-INF/` in the nested runtime. Miuix's published module POM identifies
+the Apache License 2.0; its license file is linked above.
+
+The About page uses AtomChat's original layout and bundled brand and author
+artwork, presented with Miuix components. Its OS3 dynamic background adapts
+upstream example effect code and remains under Apache License 2.0:
+[effect source directory](https://github.com/compose-miuix-ui/miuix/tree/main/example/shared/src/commonMain/kotlin/component/effect),
+[BgEffectBackground.kt](https://github.com/compose-miuix-ui/miuix/blob/main/example/shared/src/commonMain/kotlin/component/effect/BgEffectBackground.kt),
+and [OS3BgFrag.kt](https://github.com/compose-miuix-ui/miuix/blob/main/example/shared/src/commonMain/kotlin/component/effect/OS3BgFrag.kt).
 
 Copyright (c) their respective authors and contributors.
 
@@ -234,8 +262,8 @@ Apache License
 
 ## Skia (BSD 3-Clause)
 
-The native Skia graphics engine is bundled inside the Skija platform artifact.
-Skia is developed at https://skia.org.
+The native Skia graphics engine is bundled by both the Skija and Skiko platform
+artifacts. Skia is developed at https://skia.org.
 
 Skia Graphics Engine
 Copyright (c) 2011 Google Inc. All rights reserved.

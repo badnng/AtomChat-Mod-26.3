@@ -75,10 +75,8 @@ public final class ShellHeader {
         // Floating chrome: same elevation language as the menus (two-tier
         // shadow behind an opaque-ish surface), unlike the edge-highlighted
         // content cards.
-        SkiaDraw.drawChromeShadow(canvas, header.x(), header.y(), header.w(), header.h(),
+        UiSurfaces.chrome(canvas, header.x(), header.y(), header.w(), header.h(),
                 UiTokens.headerRadius());
-        SkiaDraw.drawRoundedRect(canvas, header.x(), header.y(), header.w(), header.h(),
-                UiTokens.headerRadius(), UiTokens.cardFill());
 
         if (showBack && backButton != null) {
             boolean pressed = backPressedNow;
@@ -163,7 +161,13 @@ public final class ShellHeader {
             canvas.scale(scale.scale(), scale.scale());
             canvas.translate(-cx, -cy);
         }
-        if (hover > 0.01F) {
+        if (com.atom.chat.ui.miuix.MiuixComponents.isActive()) {
+            float inset = UiTokens.EDGE_CONTROL_INSET;
+            com.atom.chat.ui.miuix.MiuixComponents.button(canvas,
+                    rect.x() + inset, rect.y() + inset,
+                    rect.w() - inset * 2.0F, rect.h() - inset * 2.0F,
+                    UiTokens.radius(8), false, hover > 0.01F, pressed, false);
+        } else if (hover > 0.01F) {
             float inset = UiTokens.EDGE_CONTROL_INSET;
             float x = rect.x() + inset;
             float y = rect.y() + inset;

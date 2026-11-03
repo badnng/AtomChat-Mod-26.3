@@ -428,6 +428,11 @@ public final class ProfilePage {
         sessionStartMs = System.currentTimeMillis();
     }
 
+    /** Connection-scoped clock shared by both interface implementations. */
+    public static long sessionStartedAt() {
+        return sessionStartMs;
+    }
+
     private UUID subjectUuid() {
         if (subject != null) {
             return subject.uuid();

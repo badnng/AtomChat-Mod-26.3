@@ -156,6 +156,8 @@ public final class SettingsSectionPage {
     private static final String ACTION_WALLPAPER_CLEAR = "wallpaper_clear";
     private static final String ACTION_TELEPORT_MODE = "teleport_mode";
     private static final String ACTION_PAGE_NAV_STYLE = "page_nav_style";
+    private static final String ACTION_MIUIX_NAVIGATION_STYLE = "miuix_navigation_style";
+    private static final String ACTION_UI_STYLE = "ui_style";
     private static final String ACTION_AVATAR_STYLE = "avatar_style";
     private static final String ACTION_HISTORY_CLEAR = "history_clear";
     private static final String ACTION_CACHE_CLEAR = "cache_clear";
@@ -205,6 +207,22 @@ public final class SettingsSectionPage {
      * tapping cycles between the two and saves (the handler lives on the
      * screen, like every other action card).
      */
+    private SettingsItem miuixNavigationStyleItem() {
+        return new SettingsItem("miuix_navigation_style",
+                "atomchat.settings.appearance.miuix_navigation_style",
+                "atomchat.settings.appearance.miuix_navigation_style.desc",
+                () -> true, v -> {
+        });
+    }
+
+    private SettingsItem uiStyleItem() {
+        return new SettingsItem("ui_style",
+                "atomchat.settings.appearance.ui_style",
+                "atomchat.settings.appearance.ui_style.desc",
+                () -> true, v -> {
+        });
+    }
+
     private SettingsItem avatarStyleItem() {
         return new SettingsItem("avatar_style",
                 "atomchat.settings.chat.avatar_style",
@@ -682,6 +700,15 @@ public final class SettingsSectionPage {
             String mode = AtomChatConfig.get().teleportCommandMode;
             subtitle = tr("atomchat.settings.chat.teleport." + (mode == null ? "auto" : mode));
             verb = tr("atomchat.settings.action.cycle");
+        } else if (ACTION_MIUIX_NAVIGATION_STYLE.equals(row.actionId())) {
+            subtitle = tr(item.subtitleKey());
+            verb = tr("atomchat.settings.appearance.miuix_navigation_style."
+                    + AtomChatConfig.get().effectiveMiuixNavigationStyle().name().toLowerCase(java.util.Locale.ROOT));
+        } else if (ACTION_UI_STYLE.equals(row.actionId())) {
+            subtitle = tr(item.subtitleKey());
+            verb = tr(AtomChatConfig.get().effectiveUiStyle() == AtomChatConfig.UiStyle.MIUIX
+                    ? "atomchat.settings.appearance.ui_style.miuix"
+                    : "atomchat.settings.appearance.ui_style.atomchat");
         } else if (ACTION_AVATAR_STYLE.equals(row.actionId())) {
             subtitle = tr(AtomChatConfig.get().effectiveAvatarStyle() == AtomChatConfig.AvatarStyle.E33CHAT
                     ? "atomchat.settings.chat.avatar_style.e33chat"
@@ -902,7 +929,11 @@ public final class SettingsSectionPage {
                                 "opacity", "cardtint"));
             }
             default -> {
-                // Theme strip first - one tap to a whole new look.
+                addGroup(rows, "atomchat.settings.group.appearance.interface", () -> {
+                    rows.add(Row.ofAction(ACTION_UI_STYLE, uiStyleItem()));
+                    rows.add(Row.ofAction(ACTION_MIUIX_NAVIGATION_STYLE, miuixNavigationStyleItem()));
+                });
+                // Color presets remain independent of the interface presentation.
                 addGroup(rows, "atomchat.settings.group.appearance.presets",
                         () -> rows.add(Row.ofThemes()));
                 addGroup(rows, "atomchat.settings.group.appearance.corners",
@@ -1610,7 +1641,7 @@ public final class SettingsSectionPage {
                 try {
                     // Washes and dividers clip to the card's rounding, so the
                     // first and last rows' bands never bleed past the corners.
-                    SkiaDraw.clip(canvas, card.x(), card.y(), card.w(), card.h(),
+                    com.atom.chat.ui.UiSurfaces.clip(canvas, card.x(), card.y(), card.w(), card.h(),
                             UiTokens.settingsRowRadius());
                     float pad = UiTokens.SETTINGS_ROW_PAD;
                     for (int j = start; j < end; j++) {
@@ -1635,7 +1666,7 @@ public final class SettingsSectionPage {
                         }
                         float rowAlpha = rowHover.getOrDefault(j, 0.0F);
                         if (rowAlpha > 0.01F) {
-                            SkiaDraw.drawRoundedRect(canvas, rect.x(), rect.y(),
+                            com.atom.chat.ui.UiSurfaces.background(canvas, rect.x(), rect.y(),
                                     rect.w(), rect.h(), 0.0F, UiTokens.cardHover(rowAlpha));
                         }
                         if (j > start) {
@@ -2608,6 +2639,8 @@ public final class SettingsSectionPage {
 
         UiLayout.Rect track = sliderTrackRect(rect);
         float t = knobPosition(slider, dragging);
+        if (com.atom.chat.ui.miuix.MiuixControls.slider(canvas, track.x(), track.y(),
+                track.w(), track.h(), t, accent)) return;
         float radius = UiTokens.radius(UiTokens.SLIDER_TRACK_H / (2.0F * UiTokens.SCALE));
         SkiaDraw.drawRoundedRect(canvas, track.x(), track.y(), track.w(), track.h(), radius,
                 UiTokens.trackRest());

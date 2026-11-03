@@ -66,7 +66,9 @@ class PanelShellWiringSourceTest {
         REQUIRED.put("PanelOpenMotion.stepProgress(panelProgress, closing, frameDtMs,", 1);
         REQUIRED.put("PanelOpenMotion.settled(panelProgress, closing)", 1);
         REQUIRED.put("PanelOpenMotion.closeDue(panelProgress, closing)", 1);
-        REQUIRED.put("PanelOpenMotion.chromeAnimating(panelSettled,", 1);
+        // Background sampling now runs at 60 Hz without camera/chrome motion gates.
+        REQUIRED.put("PanelOpenMotion.chromeAnimating(panelSettled,", 0);
+        REQUIRED.put("BlurMotionGate.noteFrame(", 0);
         REQUIRED.put("PanelOpenMotion.blurCapture(", 1);
         REQUIRED.put("PanelOpenMotion.openScale(progress, AtomChatConfig.get().pageNavStyle)", 1);
         REQUIRED.put("PanelOpenMotion.openSlidePx(progress, AtomChatConfig.get().pageNavStyle)", 1);

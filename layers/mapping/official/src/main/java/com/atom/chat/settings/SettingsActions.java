@@ -209,6 +209,16 @@ public final class SettingsActions {
             };
             TeleportCommands.reset();
             AtomChatConfig.save(cfg);
+        } else if ("miuix_navigation_style".equals(actionId)) {
+            AtomChatConfig cfg = AtomChatConfig.get();
+            AtomChatConfig.MiuixNavigationStyle[] styles = AtomChatConfig.MiuixNavigationStyle.values();
+            cfg.miuixNavigationStyle = styles[(cfg.effectiveMiuixNavigationStyle().ordinal() + 1) % styles.length];
+            AtomChatConfig.save(cfg);
+        } else if ("ui_style".equals(actionId)) {
+            AtomChatConfig cfg = AtomChatConfig.get();
+            cfg.uiStyle = cfg.effectiveUiStyle() == AtomChatConfig.UiStyle.MIUIX
+                    ? AtomChatConfig.UiStyle.ATOMCHAT : AtomChatConfig.UiStyle.MIUIX;
+            AtomChatConfig.save(cfg);
         } else if ("avatar_style".equals(actionId)) {
             AtomChatConfig cfg = AtomChatConfig.get();
             cfg.avatarStyle = cfg.effectiveAvatarStyle() == AtomChatConfig.AvatarStyle.E33CHAT

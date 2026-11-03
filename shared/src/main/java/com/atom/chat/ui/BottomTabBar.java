@@ -1,9 +1,15 @@
 package com.atom.chat.ui;
 
+import com.atom.chat.config.AtomChatConfig;
+import com.atom.chat.font.FontManager;
 import com.atom.chat.render.Animator;
 import com.atom.chat.render.Easing;
 import com.atom.chat.render.SkiaDraw;
+import com.atom.chat.render.SkiaFontRenderer;
+import com.atom.chat.ui.miuix.MiuixComponents;
+import com.atom.chat.ui.miuix.MiuixPalette;
 import io.github.humbleui.skija.Canvas;
+import io.github.humbleui.skija.Font;
 import io.github.humbleui.skija.Color;
 import io.github.humbleui.skija.Paint;
 import io.github.humbleui.skija.PaintMode;
@@ -22,6 +28,7 @@ import io.github.humbleui.types.Rect;
  * push so the capsule and the page body always move together.</p>
  */
 public final class BottomTabBar {
+    private static final String[] FALLBACK_LABELS = {"Chat", "Profile", "Settings"};
     private static final Path[] ICONS = {
             AppIcons.ICON_TAB_CHAT_PATH,
             AppIcons.ICON_TAB_PROFILE_PATH,
@@ -78,8 +85,9 @@ public final class BottomTabBar {
         int hovered = hitTest(vmx, vmy, bar);
         // The scaled shape is the cell's capsule, so the bounce budget derives
         // from the capsule width (render draws the same geometry).
-        float capsuleW = bar != null && bar.w() > 0.0F
-                ? bar.w() / 3.0F - UiTokens.TAB_EDGE_PAD * 2.0F
+        UiLayout.Rect bounds = navigationBounds(bar);
+        float capsuleW = bounds != null && bounds.w() > 0.0F
+                ? bounds.w() / 3.0F - UiTokens.TAB_EDGE_PAD * 2.0F
                 : UiTokens.TAB_EDGE_PAD * 2.0F;
         for (int i = 0; i < 3; i++) {
             tabHover[i] = UiMotion.approach(tabHover[i], i == hovered ? 1.0F : 0.0F,
@@ -90,12 +98,19 @@ public final class BottomTabBar {
 
     public void render(Canvas canvas, UiLayout.Rect bar, int selectedIndex,
                        int textPrimary, int accent) {
+        render(canvas, bar, selectedIndex, textPrimary, accent, FALLBACK_LABELS);
+    }
+
+    public void render(Canvas canvas, UiLayout.Rect bar, int selectedIndex,
+                       int textPrimary, int accent, String[] labels) {
         if (bar == null || bar.w() <= 0.0F || bar.h() <= 0.0F) {
             return;
         }
-        SkiaDraw.drawChromeShadow(canvas, bar.x(), bar.y(), bar.w(), bar.h(), UiTokens.chromeRadius());
-        SkiaDraw.drawRoundedRect(canvas, bar.x(), bar.y(), bar.w(), bar.h(),
-                UiTokens.chromeRadius(), UiTokens.cardFill());
+        if (MiuixComponents.isActive()) {
+            renderMiuix(canvas, navigationBounds(bar), selectedIndex, textPrimary, accent, labels);
+            return;
+        }
+        UiSurfaces.chrome(canvas, bar.x(), bar.y(), bar.w(), bar.h(), UiTokens.chromeRadius());
 
         float cellWidth = bar.w() / 3.0F;
         // The selected/hover capsule is inset from the bar by TAB_EDGE_PAD on
@@ -119,7 +134,7 @@ public final class BottomTabBar {
         // capsule has no per-cell identity of its own while it slides.
         canvas.save();
         applyBounce(canvas, tabScale[selectedIndex].scale(), capsuleCenterX, barCenterY);
-        SkiaDraw.drawRoundedRect(canvas, capsuleX, bar.y() + inset, capsuleW, capsuleH, radius,
+        UiSurfaces.background(canvas, capsuleX, bar.y() + inset, capsuleW, capsuleH, radius,
                 UiTokens.accentFill());
         canvas.restore();
 
@@ -136,7 +151,7 @@ public final class BottomTabBar {
             // would only dull it.
             if (i != selectedIndex && tabHover[i] > 0.01F) {
                 float x = bar.x() + cellWidth * i + inset;
-                SkiaDraw.drawRoundedRect(canvas, x, bar.y() + inset, capsuleW, capsuleH, radius,
+                UiSurfaces.background(canvas, x, bar.y() + inset, capsuleW, capsuleH, radius,
                         UiTokens.cardHover(tabHover[i]));
             }
 
@@ -149,6 +164,76 @@ public final class BottomTabBar {
 
             canvas.restore();
         }
+    }
+
+    private void renderMiuix(Canvas canvas, UiLayout.Rect bar, int selectedIndex,
+                             int textPrimary, int accent, String[] labels) {
+        AtomChatConfig.MiuixNavigationStyle style = AtomChatConfig.get().effectiveMiuixNavigationStyle();
+        int selected = Math.max(0, Math.min(2, selectedIndex));
+        float inset = Math.min(UiTokens.MIUIX_NAV_INSET, Math.min(bar.h(), bar.w() / 3.0F) / 4.0F);
+        float cellWidth = bar.w() / 3.0F;
+        float capsuleWidth = cellWidth - inset * 2.0F;
+        float capsuleHeight = bar.h() - inset * 2.0F;
+        float centerY = bar.y() + bar.h() / 2.0F;
+        float radius = style == AtomChatConfig.MiuixNavigationStyle.FLOATING
+                ? UiTokens.handleRadius(bar.h()) : UiTokens.chromeRadius();
+        UiSurfaces.chrome(canvas, bar.x(), bar.y(), bar.w(), bar.h(), radius);
+        float indicator = Math.max(0, Math.min(2, indicatorAnim.getValue()));
+        float indicatorX = bar.x() + indicator * cellWidth + inset;
+        canvas.save();
+        try {
+            applyBounce(canvas, tabScale[selected].scale(), indicatorX + capsuleWidth / 2.0F, centerY);
+            UiSurfaces.background(canvas, indicatorX, bar.y() + inset, capsuleWidth, capsuleHeight,
+                    UiTokens.handleRadius(capsuleHeight), accent);
+        } finally {
+            canvas.restore();
+        }
+        boolean allLabels = style == AtomChatConfig.MiuixNavigationStyle.ICON_AND_TEXT;
+        boolean selectedLabel = style == AtomChatConfig.MiuixNavigationStyle.SELECTED_LABEL;
+        float fontSize = Math.min(UiTokens.MIUIX_NAV_LABEL_SIZE, capsuleHeight * 0.24F);
+        Font labelFont = allLabels || selectedLabel ? FontManager.font(fontSize) : null;
+        for (int i = 0; i < 3; i++) {
+            float centerX = bar.x() + cellWidth * (i + 0.5F);
+            boolean showLabel = allLabels || (selectedLabel && i == selected);
+            float labelHeight = showLabel ? SkiaFontRenderer.getHeight(labelFont) : 0;
+            float gap = showLabel ? Math.min(UiTokens.MIUIX_NAV_LABEL_GAP, capsuleHeight * 0.06F) : 0;
+            float iconSize = Math.min(UiTokens.TAB_ICON_SIZE,
+                    Math.max(0, capsuleHeight - labelHeight - gap));
+            float contentHeight = iconSize + labelHeight + gap;
+            float iconY = centerY - contentHeight / 2.0F + iconSize / 2.0F;
+            int color = i == selected ? UiTokens.onAccent(accent) : textPrimary;
+            canvas.save();
+            try {
+                applyBounce(canvas, tabScale[i].scale(), centerX, centerY);
+                if (i != selected && tabHover[i] > 0.01F) {
+                    UiSurfaces.background(canvas, bar.x() + cellWidth * i + inset,
+                            bar.y() + inset, capsuleWidth, capsuleHeight,
+                            UiTokens.handleRadius(capsuleHeight),
+                            MiuixPalette.hover(MiuixPalette.surface(), tabHover[i]));
+                }
+                drawIconCentered(canvas, ICONS[i], centerX, iconY, iconSize, color);
+                if (showLabel) {
+                    String label = labels != null && i < labels.length && labels[i] != null
+                            ? labels[i] : FALLBACK_LABELS[i];
+                    label = SkiaFontRenderer.truncate(labelFont, label, Math.max(0, capsuleWidth - inset));
+                    SkiaFontRenderer.drawTextCentered(canvas, labelFont, label, centerX,
+                            iconY + iconSize / 2.0F + gap + labelHeight / 2.0F, color);
+                }
+            } finally {
+                canvas.restore();
+            }
+        }
+    }
+
+    /** Actual navigation surface inside the unchanged layout slot. */
+    public static UiLayout.Rect navigationBounds(UiLayout.Rect bar) {
+        if (bar == null || bar.w() <= 0 || bar.h() <= 0 || !MiuixComponents.isActive()
+                || AtomChatConfig.get().effectiveMiuixNavigationStyle()
+                != AtomChatConfig.MiuixNavigationStyle.FLOATING) return bar;
+        float width = Math.min(bar.w() * 0.72F, UiTokens.MIUIX_NAV_FLOATING_MAX_W);
+        float height = Math.min(bar.h(), UiTokens.MIUIX_NAV_FLOATING_H);
+        return new UiLayout.Rect(bar.x() + (bar.w() - width) / 2.0F,
+                bar.y() + (bar.h() - height) / 2.0F, width, height);
     }
 
     /**
@@ -166,6 +251,7 @@ public final class BottomTabBar {
 
     /** Returns 0..2 for the three equal cells, or -1 when outside the bar. */
     public static int hitTest(float x, float y, UiLayout.Rect bar) {
+        bar = navigationBounds(bar);
         if (bar == null || bar.w() <= 0.0F || bar.h() <= 0.0F
                 || x < bar.x() || x > bar.right() || y < bar.y() || y > bar.bottom()) {
             return -1;

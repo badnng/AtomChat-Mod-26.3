@@ -5,6 +5,7 @@ import com.atom.chat.ui.Animations;
 import com.atom.chat.ui.PressScale;
 import com.atom.chat.ui.UiMotion;
 import com.atom.chat.ui.UiTokens;
+import com.atom.chat.ui.miuix.MiuixComponents;
 import io.github.humbleui.skija.Canvas;
 import io.github.humbleui.skija.Color;
 import io.github.humbleui.skija.Paint;
@@ -234,7 +235,14 @@ public final class DrawPrimitives {
         float hoverWash = buttonHover[id];
         float pressedWash = pressed ? 1.0F : 0.0F;
         float wash = Math.max(hoverWash, pressedWash);
-        if (wash > 0.01F) {
+        boolean heldOpen = (id == 1 && host.emojiPanelOpen()) || (id == 3 && host.phrasePanelOpen());
+        if (MiuixComponents.isActive()) {
+            float inset = UiTokens.EDGE_CONTROL_INSET;
+            MiuixComponents.button(canvas, bx + inset, by + inset,
+                    UiTokens.ACTION_BUTTON_SIZE - inset * 2.0F,
+                    UiTokens.ACTION_BUTTON_SIZE - inset * 2.0F,
+                    UiTokens.radius(8), false, hover, pressed || pressedHeld || heldOpen, false);
+        } else if (wash > 0.01F) {
             float inset = UiTokens.EDGE_CONTROL_INSET;
             SkiaDraw.drawRoundedRect(canvas, bx + inset, by + inset,
                     UiTokens.ACTION_BUTTON_SIZE - inset * 2.0F,
@@ -275,11 +283,16 @@ public final class DrawPrimitives {
             canvas.translate(-(bx + UiTokens.BUTTON_W / 2.0F), -(by + UiTokens.BUTTON_H / 2.0F));
         }
         float buttonRadius = UiTokens.radius(9);
-        SkiaDraw.drawRoundedRect(canvas, bx, by, UiTokens.BUTTON_W, UiTokens.BUTTON_H, buttonRadius, accent());
-        float overlay = buttonHover[2] * 55.0F + (pressed ? 90.0F : 0.0F);
-        if (overlay > 0.5F) {
-            SkiaDraw.drawRoundedRect(canvas, bx, by, UiTokens.BUTTON_W, UiTokens.BUTTON_H, buttonRadius,
-                    Color.makeARGB((int) Math.min(160, overlay), 255, 255, 255));
+        if (MiuixComponents.isActive()) {
+            MiuixComponents.button(canvas, bx, by, UiTokens.BUTTON_W, UiTokens.BUTTON_H,
+                    buttonRadius, true, hover, pressed || pressedHeld, false);
+        } else {
+            SkiaDraw.drawRoundedRect(canvas, bx, by, UiTokens.BUTTON_W, UiTokens.BUTTON_H, buttonRadius, accent());
+            float overlay = buttonHover[2] * 55.0F + (pressed ? 90.0F : 0.0F);
+            if (overlay > 0.5F) {
+                SkiaDraw.drawRoundedRect(canvas, bx, by, UiTokens.BUTTON_W, UiTokens.BUTTON_H, buttonRadius,
+                        Color.makeARGB((int) Math.min(160, overlay), 255, 255, 255));
+            }
         }
         // Icon ink derives from the solid accent fill it sits on (same language
         // as the selected bottom tab), not from the panel's text colour: a pale

@@ -6,6 +6,7 @@ import com.atom.chat.chat.PrivateChatStore;
 import com.atom.chat.chat.PrivateEchoTracker;
 import com.atom.chat.config.AtomChatConfig;
 import com.atom.chat.image.ImageLoader;
+import com.atom.chat.miuix.NativeMiuixRuntime;
 import com.atom.chat.notification.NotificationBanner;
 import com.atom.chat.notification.NotificationController;
 import com.atom.chat.render.PanelBlurRenderer;
@@ -14,6 +15,7 @@ import com.atom.chat.util.AwtDisplay;
 import com.atom.chat.util.CacheDirs;
 import com.atom.chat.wallpaper.WallpaperStore;
 import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
@@ -82,6 +84,18 @@ public class AtomChatClient {
         com.atom.chat.net.ProfileCompanionClient.init();
         com.atom.chat.history.ChatHistory.init(
                 net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get().resolve("atomchat/history"));
+        try {
+            // Setup completes before any screen can open, including switching to
+            // MIUIX later from the default style. Warm up CPU composition/layout
+            // with a no-op host and close its scene on this same setup thread.
+            // No window, surface or GL context is created or retained here.
+            NativeMiuixRuntime.preloadResources();
+        } catch (Exception | LinkageError failure) {
+            // Preloading is optional. Do not make it a new startup requirement;
+            // the actual scene still resolves its resources when it opens.
+            AtomChat.LOGGER.debug(com.atom.chat.diagnostics.AtomChatLog.message(
+                    "startup", "Miuix resource preload deferred until the interface opens"), failure);
+        }
         AtomChat.LOGGER.info(com.atom.chat.diagnostics.AtomChatLog.message("startup", "AtomChat client initialized"));
     }
 
@@ -130,10 +144,12 @@ public class AtomChatClient {
     private static void onClientTick(ClientTickEvent.Post event) {
         Minecraft client = Minecraft.getInstance();
         // First tick only (self-guarded): identity always, the detailed block
-        // when debug is on. It lives here rather than in client setup because
-        // the GPU rows need a current GL context, which only the render thread
-        // has — and the tick runs on it.
-        com.atom.chat.diagnostics.EnvironmentSummary.logOnce(AtomChat.version(), AtomChat.artifactPath());
+        // when debug is on. Read the active backend's device metadata: Vulkan
+        // ticks do not have an OpenGL context, even on the render thread.
+        com.atom.chat.diagnostics.EnvironmentSummary.logOnce(AtomChat.version(), AtomChat.artifactPath(), () -> {
+            var device = RenderSystem.getDevice().getDeviceInfo();
+            return device.backendName() + " | " + device.name() + " | " + device.driverInfo();
+        });
         com.atom.chat.history.ChatHistory.tick(client);
         com.atom.chat.net.MediaCompanionClient.tick();
         com.atom.chat.net.ProfileCompanionClient.tick();

@@ -399,6 +399,16 @@ public final class AvatarClickWiring {
      * wobble plays for the sender immediately; the target's client wobbles when
      * the server relays it.
      */
+    /** Explicit menu action uses the same permission, sound and delivery path as double-click. */
+    public void poke(MessageFacts target) {
+        if (target == null || target.system() || target.own() || target.senderUuid() == null
+                || target.senderUuid().equals(host.localPlayerId())
+                || !host.pokeConfigEnabled() || !host.animationsEnabled()) {
+            return;
+        }
+        sendPoke(target);
+    }
+
     private void sendPoke(MessageFacts target) {
         UUID uuid = target == null ? null : target.senderUuid();
         if (uuid == null) {

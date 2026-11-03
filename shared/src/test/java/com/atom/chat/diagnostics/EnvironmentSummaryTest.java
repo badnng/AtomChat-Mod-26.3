@@ -137,6 +137,30 @@ class EnvironmentSummaryTest {
         assertTrue(block.contains("Stub GPU | 4.6 | Stub Vendor"), block);
     }
 
+    @Test
+    void legacyGpuProbeSurvivesNoCurrentOpenGlContext() {
+        // This worker has no GL context. Calling the original native probe here
+        // aborted the JVM instead of throwing a catchable exception.
+        String line = EnvironmentSummary.gpuLine();
+        assertTrue(line.startsWith("unavailable ("), line);
+    }
+
+    @Test
+    void backendGpuProbeDoesNotRequireAnOpenGlContext() {
+        String block = EnvironmentSummary.debugBlock("0.3.0", null, new AtomChatConfig(),
+                () -> "Vulkan | Test GPU | Test driver");
+        assertTrue(block.contains("Vulkan | Test GPU | Test driver"), block);
+    }
+
+    @Test
+    void failedBackendGpuProbeKeepsTheOtherDiagnostics() {
+        String block = EnvironmentSummary.debugBlock("0.3.0", null, new AtomChatConfig(), () -> {
+            throw new LinkageError("device unavailable");
+        });
+        assertTrue(block.contains("unavailable (LinkageError: device unavailable)"), block);
+        assertTrue(block.contains("\n  switches"), block);
+    }
+
     /**
      * 我们自己写死的那部分文本必须是纯 ASCII。
      *

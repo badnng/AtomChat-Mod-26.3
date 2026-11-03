@@ -18,6 +18,7 @@ final class GpuSkiaSurface implements AutoCloseable {
     private DirectContext context;
     private BackendRenderTarget target;
     private Surface surface;
+    private SharedGlSession session;
     private int framebuffer;
     private int stencil;
     private GlStateSnapshot drawingState;
@@ -27,6 +28,7 @@ final class GpuSkiaSurface implements AutoCloseable {
     private int ownedTexture;
     private int width;
     private int height;
+    private boolean closing;
 
     /** Uses a private GL context for Vulkan; unsupported backends keep raster fallback. */
     static GpuSkiaSurface create(DynamicTexture texture, int width, int height) {
@@ -75,6 +77,8 @@ final class GpuSkiaSurface implements AutoCloseable {
             if (result.surface == null) {
                 throw new IllegalStateException("Unable to wrap AtomChat Skia framebuffer");
             }
+            result.session = new SharedGlSession(result.context, result.surface,
+                    () -> result.drawingState != null || result.drawingContext != null);
             return result;
         } catch (RuntimeException | LinkageError failure) {
             // This also handles a successful allocation followed by a failed
@@ -92,6 +96,10 @@ final class GpuSkiaSurface implements AutoCloseable {
 
     Surface surface() {
         return surface;
+    }
+
+    SharedGlSession session() {
+        return session;
     }
 
     void begin() {
@@ -148,9 +156,28 @@ final class GpuSkiaSurface implements AutoCloseable {
 
     @Override
     public void close() {
+        if (closing) {
+            return;
+        }
+        closing = true;
+        try {
+            closeAll();
+        } finally {
+            closing = false;
+        }
+    }
+
+    private void closeAll() {
         HiddenGlContext.Cleanup cleanup = new HiddenGlContext.Cleanup(null);
         if (drawingState != null || drawingContext != null) {
             cleanup.run(this::end);
+        }
+        // Attached producers must release their native contexts and GL objects
+        // before this surface's Humble context or hidden SDL context goes away.
+        SharedGlSession oldSession = session;
+        session = null;
+        if (oldSession != null) {
+            cleanup.run(oldSession::close);
         }
         if (surface != null || context != null || target != null || framebuffer != 0 || stencil != 0 || ownedTexture != 0) {
             cleanup.run(() -> {

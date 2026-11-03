@@ -219,6 +219,9 @@ class PanelBlurCompositeTest {
             ByteBuffer pixels = pixmap.getBuffer();
             return new Pixel(pixels.get(0) & 0xFF, pixels.get(1) & 0xFF,
                     pixels.get(2) & 0xFF, pixels.get(3) & 0xFF);
+        } finally {
+            // The native Pixmap view does not own this direct allocation.
+            java.lang.ref.Reference.reachabilityFence(buffer);
         }
     }
 
@@ -235,6 +238,8 @@ class PanelBlurCompositeTest {
             byte[] result = new byte[copy.capacity()];
             copy.get(result);
             return result;
+        } finally {
+            java.lang.ref.Reference.reachabilityFence(buffer);
         }
     }
 

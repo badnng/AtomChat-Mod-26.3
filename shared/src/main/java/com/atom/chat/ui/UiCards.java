@@ -1,6 +1,8 @@
 package com.atom.chat.ui;
 
 import com.atom.chat.render.SkiaDraw;
+import com.atom.chat.ui.miuix.MiuixComponents;
+import com.atom.chat.ui.miuix.MiuixPalette;
 import io.github.humbleui.skija.Canvas;
 
 /**
@@ -57,6 +59,10 @@ public final class UiCards {
     public static void drawCard(Canvas canvas, float x, float y, float w, float h,
                                 float radius, float hoverWeight, int shadowColor, float shadowBlur,
                                 int baseFill) {
+        if (MiuixComponents.isActive()) {
+            drawMiuixSurface(canvas, x, y, w, h, radius, hoverWeight, baseFill);
+            return;
+        }
         SkiaDraw.drawRoundedShadow(canvas, x, y, w, h, radius, shadowBlur, shadowColor);
         SkiaDraw.drawRoundedRect(canvas, x, y, w, h, radius, baseFill);
         // The hairline language: one stroke width, alpha 42 on both
@@ -82,6 +88,10 @@ public final class UiCards {
      */
     public static void drawFloatSurface(Canvas canvas, float x, float y, float w, float h,
                                         float radius, float hoverWeight, int baseFill) {
+        if (MiuixComponents.isActive()) {
+            drawMiuixSurface(canvas, x, y, w, h, radius, hoverWeight, baseFill);
+            return;
+        }
         SkiaDraw.drawChromeShadow(canvas, x, y, w, h, radius,
                 UiTokens.FLOAT_SHADOW_INNER, UiTokens.FLOAT_SHADOW_OUTER);
         SkiaDraw.drawRoundedRect(canvas, x, y, w, h, radius, baseFill);
@@ -90,6 +100,17 @@ public final class UiCards {
         if (hoverWeight > 0.01F) {
             SkiaDraw.drawRoundedRect(canvas, x, y, w, h, radius, UiTokens.cardHover(
                     com.atom.chat.config.AtomChatConfig.get().accentColor, baseFill, hoverWeight));
+        }
+    }
+
+    private static void drawMiuixSurface(Canvas canvas, float x, float y, float w, float h,
+                                         float radius, float hoverWeight, int baseFill) {
+        MiuixComponents.shadow(canvas, x, y, w, h, radius, MiuixPalette.shadow(),
+                UiTokens.MIUIX_SHADOW_BLUR, UiTokens.MIUIX_SHADOW_Y);
+        MiuixComponents.surface(canvas, x, y, w, h, radius, baseFill);
+        if (hoverWeight > 0.01F) {
+            MiuixComponents.surface(canvas, x, y, w, h, radius,
+                    MiuixPalette.hover(UiTokens.cardCutout(), hoverWeight));
         }
     }
 }

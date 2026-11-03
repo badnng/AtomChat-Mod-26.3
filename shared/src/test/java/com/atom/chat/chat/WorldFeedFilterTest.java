@@ -30,8 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>The filter's state is only observable through what it produces — the icon
  * and tint of the header action, and the rows the feed keeps — so the tests
- * assert exactly those. That is deliberate: a state accessor would let the state
- * and its rendering drift apart, and that mapping is one expression.
+ * assert exactly those, together with the mode published to the native UI.
  *
  * <p>Which messages each mode accepts is {@link MessageFilterTest}'s job (it
  * needs Minecraft types to build a system line); what is pinned here is that the
@@ -99,14 +98,17 @@ class WorldFeedFilterTest {
         WorldFeedFilter filter = new WorldFeedFilter();
 
         filter.cycle();
+        assertEquals(MessageFilter.SYSTEM, filter.mode());
         assertSame(AppIcons.ICON_ANNOUNCE_PATH, action(filter).icon(), "ALL -> SYSTEM: speaker");
         assertEquals(AtomChatConfig.get().accentColor, action(filter).color(),
                 "an active filter reads at a glance");
 
         filter.cycle();
+        assertEquals(MessageFilter.PLAYERS, filter.mode());
         assertSame(AppIcons.ICON_TAB_PROFILE_PATH, action(filter).icon(), "SYSTEM -> PLAYERS: person");
 
         filter.cycle();
+        assertEquals(MessageFilter.ALL, filter.mode());
         assertSame(AppIcons.ICON_FILTER_PATH, action(filter).icon(), "PLAYERS -> ALL: back to the funnel");
         assertEquals(AtomChatConfig.get().textPrimaryColor, action(filter).color());
     }

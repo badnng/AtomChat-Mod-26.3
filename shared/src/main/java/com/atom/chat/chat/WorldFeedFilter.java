@@ -39,6 +39,9 @@ public final class WorldFeedFilter {
      */
     public boolean accepts(ChatMessage message) { return worldFilter.accepts(message); }
 
+    /** Mapping-neutral mode for native UI icons and accessibility labels. */
+    public MessageFilter mode() { return worldFilter; }
+
     public void cycle() {
         worldFilter = worldFilter.next();
     }
